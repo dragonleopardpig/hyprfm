@@ -383,6 +383,7 @@ void DependencyChecker::populate()
             {QStringLiteral("ubuntu"),    QStringLiteral("gvfs-backends")},
             {QStringLiteral("linuxmint"), QStringLiteral("gvfs-backends")},
             {QStringLiteral("pop"),       QStringLiteral("gvfs-backends")},
+            {QStringLiteral("nixos"),     QStringLiteral("gvfs")},
         })
     });
 
@@ -407,6 +408,7 @@ void DependencyChecker::populate()
             {QStringLiteral("ubuntu"),    QStringLiteral("gvfs-backends")},
             {QStringLiteral("linuxmint"), QStringLiteral("gvfs-backends")},
             {QStringLiteral("pop"),       QStringLiteral("gvfs-backends")},
+            {QStringLiteral("nixos"),     QStringLiteral("gvfs")},
         })
     });
 
@@ -431,6 +433,7 @@ void DependencyChecker::populate()
             {QStringLiteral("ubuntu"),    QStringLiteral("gvfs-backends")},
             {QStringLiteral("linuxmint"), QStringLiteral("gvfs-backends")},
             {QStringLiteral("pop"),       QStringLiteral("gvfs-backends")},
+            {QStringLiteral("nixos"),     QStringLiteral("gvfs")},
         })
     });
 
