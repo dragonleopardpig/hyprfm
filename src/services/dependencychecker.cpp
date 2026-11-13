@@ -2,6 +2,7 @@
 
 #include <QDBusConnection>
 #include <QDBusConnectionInterface>
+#include <QDBusMessage>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -334,17 +335,24 @@ void DependencyChecker::populate()
         QStringLiteral("Mount Windows NTFS partitions from the device sidebar."),
         Kind::Tool, false, ntfsHelperAvailable,
         {QStringLiteral("mount.ntfs"), QStringLiteral("mount.ntfs-3g")},
-        buildHints(QStringLiteral("ntfs-3g"))
+        buildHints(QStringLiteral("ntfs-3g"), {
+            {QStringLiteral("nixos"), QStringLiteral("ntfs3g")},
+        })
     });
 
     // Required: the trash view is a trash:// URI, which only gvfsd-trash
     // serves (issue #10). trash.mount is where every distro registers it;
     // the lib dirs cover layouts without /usr/share/gvfs.
-    const bool gvfsAvailable = hasExecutable(QStringLiteral("gio")) && hasAnyFile({
-        QStringLiteral("/usr/share/gvfs/mounts/trash.mount"),
-        QStringLiteral("/usr/lib/gvfs"),
-        QStringLiteral("/usr/lib64/gvfs"),
-    });
+    const bool gvfsAvailable = hasExecutable(QStringLiteral("gio")) && (
+        gvfsReachable(QStringLiteral("org.gtk.vfs.Daemon"))
+        || !QStandardPaths::locate(QStandardPaths::GenericDataLocation, QStringLiteral("gvfs/mounts/trash.mount")).isEmpty()
+        || hasAnyFile({
+            QStringLiteral("/usr/share/gvfs/mounts/trash.mount"),
+            QStringLiteral("/usr/lib/gvfs"),
+            QStringLiteral("/usr/lib64/gvfs"),
+            QStringLiteral("/run/current-system/sw/share/gvfs/mounts/trash.mount"),
+        })
+    );
     m_deps.append({
         QStringLiteral("gvfs"),
         QStringLiteral("GVFS backends"),
@@ -354,12 +362,16 @@ void DependencyChecker::populate()
         buildHints(QStringLiteral("gvfs"))
     });
 
-    const bool gvfsAfcAvailable = hasExecutable(QStringLiteral("gio")) && hasAnyFile({
-        QStringLiteral("/usr/share/gvfs/mounts/afc.mount"),
-        QStringLiteral("/usr/lib/gvfs/gvfsd-afc"),
-        QStringLiteral("/usr/lib64/gvfs/gvfsd-afc"),
-        QStringLiteral("/usr/libexec/gvfsd-afc"),
-    });
+    const bool gvfsAfcAvailable = hasExecutable(QStringLiteral("gio")) && (
+        gvfsReachable(QStringLiteral("org.gtk.vfs.AfcVolumeMonitor"))
+        || !QStandardPaths::locate(QStandardPaths::GenericDataLocation, QStringLiteral("gvfs/mounts/afc.mount")).isEmpty()
+        || hasAnyFile({
+            QStringLiteral("/usr/share/gvfs/mounts/afc.mount"),
+            QStringLiteral("/usr/lib/gvfs/gvfsd-afc"),
+            QStringLiteral("/usr/lib64/gvfs/gvfsd-afc"),
+            QStringLiteral("/usr/libexec/gvfsd-afc"),
+        })
+    );
     m_deps.append({
         QStringLiteral("gvfs-afc"),
         QStringLiteral("GVFS AFC backend"),
@@ -374,12 +386,16 @@ void DependencyChecker::populate()
         })
     });
 
-    const bool gvfsGphoto2Available = hasExecutable(QStringLiteral("gio")) && hasAnyFile({
-        QStringLiteral("/usr/share/gvfs/mounts/gphoto2.mount"),
-        QStringLiteral("/usr/lib/gvfs/gvfsd-gphoto2"),
-        QStringLiteral("/usr/lib64/gvfs/gvfsd-gphoto2"),
-        QStringLiteral("/usr/libexec/gvfsd-gphoto2"),
-    });
+    const bool gvfsGphoto2Available = hasExecutable(QStringLiteral("gio")) && (
+        gvfsReachable(QStringLiteral("org.gtk.vfs.GPhoto2VolumeMonitor"))
+        || !QStandardPaths::locate(QStandardPaths::GenericDataLocation, QStringLiteral("gvfs/mounts/gphoto2.mount")).isEmpty()
+        || hasAnyFile({
+            QStringLiteral("/usr/share/gvfs/mounts/gphoto2.mount"),
+            QStringLiteral("/usr/lib/gvfs/gvfsd-gphoto2"),
+            QStringLiteral("/usr/lib64/gvfs/gvfsd-gphoto2"),
+            QStringLiteral("/usr/libexec/gvfsd-gphoto2"),
+        })
+    );
     m_deps.append({
         QStringLiteral("gvfs-gphoto2"),
         QStringLiteral("GVFS gphoto2 backend"),
@@ -394,12 +410,16 @@ void DependencyChecker::populate()
         })
     });
 
-    const bool gvfsMtpAvailable = hasExecutable(QStringLiteral("gio")) && hasAnyFile({
-        QStringLiteral("/usr/share/gvfs/mounts/mtp.mount"),
-        QStringLiteral("/usr/lib/gvfs/gvfsd-mtp"),
-        QStringLiteral("/usr/lib64/gvfs/gvfsd-mtp"),
-        QStringLiteral("/usr/libexec/gvfsd-mtp"),
-    });
+    const bool gvfsMtpAvailable = hasExecutable(QStringLiteral("gio")) && (
+        gvfsReachable(QStringLiteral("org.gtk.vfs.MTPVolumeMonitor"))
+        || !QStandardPaths::locate(QStandardPaths::GenericDataLocation, QStringLiteral("gvfs/mounts/mtp.mount")).isEmpty()
+        || hasAnyFile({
+            QStringLiteral("/usr/share/gvfs/mounts/mtp.mount"),
+            QStringLiteral("/usr/lib/gvfs/gvfsd-mtp"),
+            QStringLiteral("/usr/lib64/gvfs/gvfsd-mtp"),
+            QStringLiteral("/usr/libexec/gvfsd-mtp"),
+        })
+    );
     m_deps.append({
         QStringLiteral("gvfs-mtp"),
         QStringLiteral("GVFS MTP backend"),
@@ -665,4 +685,31 @@ bool DependencyChecker::udisks2Reachable()
     if (!iface)
         return false;
     return iface->isServiceRegistered(QStringLiteral("org.freedesktop.UDisks2"));
+}
+
+bool DependencyChecker::gvfsReachable(const QString &service)
+{
+    auto *iface = QDBusConnection::sessionBus().interface();
+    if (iface) {
+        if (iface->isServiceRegistered(service))
+            return true;
+
+        const QDBusMessage msg = QDBusMessage::createMethodCall(
+            QStringLiteral("org.freedesktop.DBus"),
+            QStringLiteral("/org/freedesktop/DBus"),
+            QStringLiteral("org.freedesktop.DBus"),
+            QStringLiteral("ListActivatableNames"));
+        const QDBusMessage reply = QDBusConnection::sessionBus().call(msg);
+        if (reply.type() == QDBusMessage::ReplyMessage && !reply.arguments().isEmpty()) {
+            const QStringList names = reply.arguments().at(0).toStringList();
+            if (names.contains(service))
+                return true;
+        }
+    }
+
+    const QString serviceFile = QStringLiteral("dbus-1/services/") + service + QStringLiteral(".service");
+    if (!QStandardPaths::locate(QStandardPaths::GenericDataLocation, serviceFile).isEmpty())
+        return true;
+
+    return false;
 }
