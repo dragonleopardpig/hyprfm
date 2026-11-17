@@ -83,6 +83,9 @@ package() {
     install -Dm644 "${pkgname}/themes/README.md" \
         "${pkgdir}/usr/share/hyprfm/themes/README.md"
 
+    install -Dm644 "${pkgname}/src/icons/strata/licenses/"*.txt \
+        -t "${pkgdir}/usr/share/hyprfm/licenses/strata/"
+
     # Install QML module metadata (needed for loadFromModule to find HyprFM)
     install -Dm644 "build/src/HyprFM/qmldir" \
         "${pkgdir}/usr/share/hyprfm/HyprFM/qmldir"

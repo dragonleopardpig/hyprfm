@@ -2246,7 +2246,7 @@ ApplicationWindow {
                                 Image {
                                     id: appChooserIcon
                                     source: modelData.iconName
-                                        ? ("image://icon/" + modelData.iconName + "?theme=" + config.iconTheme + "&r=" + config.iconRevision)
+                                        ? Theme.fileIconSource(modelData.iconName, "", 24, false)
                                         : ""
                                     sourceSize: Qt.size(22, 22)
                                     Layout.preferredWidth: 22
@@ -2528,7 +2528,7 @@ ApplicationWindow {
                                 Image {
                                     anchors.centerIn: parent; width: 32; height: 32
                                     source: propertiesDialog.props.iconName
-                                        ? ("image://icon/" + propertiesDialog.props.iconName + "?theme=" + config.iconTheme + "&r=" + config.iconRevision)
+                                        ? Theme.fileIconSource(propertiesDialog.props.iconName, propertiesDialog.props.name, 48, false)
                                         : ""
                                     sourceSize: Qt.size(32, 32); smooth: true
                                 }
@@ -2748,7 +2748,7 @@ ApplicationWindow {
                                         Image {
                                             id: owAppIcon
                                             source: modelData.iconName
-                                                ? ("image://icon/" + modelData.iconName + "?theme=" + config.iconTheme + "&r=" + config.iconRevision)
+                                                ? Theme.fileIconSource(modelData.iconName, "", 24, false)
                                                 : ""
                                             sourceSize: Qt.size(18, 18)
                                             width: 18; height: 18
@@ -2805,7 +2805,7 @@ ApplicationWindow {
                                         spacing: 6
 
                                         Loader {
-                                            source: "icons/IconSearch.qml"
+                                            source: Theme.iconComponentSource("IconSearch")
                                             width: 14; height: 14
                                             anchors.verticalCenter: parent.verticalCenter
                                             onLoaded: {
