@@ -78,6 +78,11 @@ package() {
     install -Dm644 "${pkgname}/themes/"*.toml \
         -t "${pkgdir}/usr/share/hyprfm/themes/"
 
+    install -Dm644 "${pkgname}/themes/licenses/"*.txt \
+        -t "${pkgdir}/usr/share/hyprfm/themes/licenses/"
+    install -Dm644 "${pkgname}/themes/README.md" \
+        "${pkgdir}/usr/share/hyprfm/themes/README.md"
+
     # Install QML module metadata (needed for loadFromModule to find HyprFM)
     install -Dm644 "build/src/HyprFM/qmldir" \
         "${pkgdir}/usr/share/hyprfm/HyprFM/qmldir"
