@@ -44,6 +44,7 @@
 #include "models/tablistmodel.h"
 #include "models/bookmarkmodel.h"
 #include "models/devicemodel.h"
+#include "models/computermodel.h"
 #include "models/recentfilesmodel.h"
 #include "models/searchresultsmodel.h"
 #include "models/searchproxymodel.h"
@@ -974,6 +975,8 @@ int main(int argc, char *argv[])
 
     // Create DeviceModel
     DeviceModel *devices = new DeviceModel(&app, true);
+    auto *computerModel = new ComputerModel(&app);
+    computerModel->setDevices(devices);
 
     // Aggregate runtime tools + compile-time features + DBus services for the
     // in-app MissingDependenciesDialog. Replaces the older hand-rolled
@@ -1039,6 +1042,7 @@ int main(int argc, char *argv[])
     shared->setContextProperty("clipboard", clipboard);
     shared->setContextProperty("dragHelper", dragHelper);
     shared->setContextProperty("devices", devices);
+    shared->setContextProperty("computerModel", computerModel);
     shared->setContextProperty("recentFiles", recentFiles);
     shared->setContextProperty("previewService", previewService);
     shared->setContextProperty("metadataExtractor", metadataExtractor);

@@ -170,6 +170,7 @@ FocusScope {
     }
 
     function ensureCurrentColumnFocus() {
+        if (!root.visible || !root.fileModel) return
         currentColumn.forceActiveFocus()
         if (currentColumn.cursorIndex >= 0) {
             currentColumn.positionViewAtIndex(currentColumn.cursorIndex, ListView.Contain)
@@ -1248,7 +1249,7 @@ FocusScope {
         ColumnDivider { objectName: "millerDivider_right"; movesPreview: true }
 
         // ── Preview column (30%) ─────────────────────────────────────────
-        Item {
+        FocusScope {
             id: previewColumn
             objectName: "millerPreviewColumn"
             width: root.width - root.parentColumnWidth - root.currentColumnWidth - 2
@@ -1256,6 +1257,7 @@ FocusScope {
             clip: true
 
             property string previewFilePath: ""
+            property alias previewZoom: zoomControls.factor
             property bool previewIsDir: false
 
             // The page we are navigating away from, held on screen until the
@@ -1497,11 +1499,24 @@ FocusScope {
             Column {
                 anchors.fill: parent
 
+                PreviewZoomControls {
+                    id: zoomControls
+                    objectName: "millerPreviewZoom"
+                    width: parent.width
+                    scope: previewColumn
+                    scrollTarget: previewColumn.isImage ? visualPreview : previewColumn.isPdf ? pdfPreviewImage
+                        : previewColumn.isTable ? previewTable : textPreviewFlick
+                    pageWheel: previewColumn.isPdf ? previewColumn.handlePdfWheel : null
+                    available: root.visible && !previewColumn.previewIsDir
+                        && (previewColumn.isImage || previewColumn.isPdf || previewColumn.isText)
+                    onInteracted: root.interactionStarted()
+                }
+
                 // Preview area
                 Item {
                     id: previewArea
                     width: parent.width
-                    height: parent.height - infoBar.height
+                    height: parent.height - infoBar.height - zoomControls.height
 
                     // Directory listing
                     ListView {
@@ -1611,13 +1626,14 @@ FocusScope {
                     }
 
                     // Image/Video preview
-                    Image {
+                    ZoomablePreviewImage {
                         id: visualPreview
+                        objectName: "millerVisualPreview"
+                        zoomFactor: (previewColumn.isImage ? zoomControls.factor : 1)
                         anchors.fill: parent
                         anchors.margins: 8
                         visible: previewColumn.hasVisualPreview && !previewColumn.previewIsDir && !previewColumn.isPdf
                         source: previewColumn.visualSource
-                        sourceSize: Qt.size(width, height)
                         fillMode: Image.PreserveAspectFit
                         asynchronous: true
                         smooth: true
@@ -1625,8 +1641,10 @@ FocusScope {
 
                     // Outgoing page, drawn underneath while the next one
                     // loads. Cleared as soon as pdfPreviewImage is Ready.
-                    Image {
+                    ZoomablePreviewImage {
                         id: pdfHoldImage
+                        zoomFactor: zoomControls.factor
+                        enabled: false
                         anchors.fill: parent
                         anchors.margins: 8
                         visible: previewColumn.pdfHoldSource !== ""
@@ -1639,8 +1657,10 @@ FocusScope {
                     }
 
                     // PDF preview
-                    Image {
+                    ZoomablePreviewImage {
                         id: pdfPreviewImage
+                        objectName: "millerPdfPreviewImage"
+                        zoomFactor: zoomControls.factor
                         anchors.fill: parent
                         anchors.margins: 8
                         visible: previewColumn.isPdf
@@ -1648,7 +1668,6 @@ FocusScope {
                             && previewColumn.pdfPreview.localPath !== ""
                             && previewColumn.pdfPreview.error === ""
                         source: previewColumn.pdfImageSource
-                        sourceSize: Qt.size(width * Screen.devicePixelRatio, height * Screen.devicePixelRatio)
                         fillMode: Image.PreserveAspectFit
                         asynchronous: true
                         smooth: true
@@ -1684,6 +1703,7 @@ FocusScope {
                         anchors.fill: parent
                         visible: pdfPreviewImage.visible
                         acceptedButtons: Qt.NoButton
+                        enabled: zoomControls.factor <= 1
                         onWheel: (wheel) => previewColumn.handlePdfWheel(wheel)
                     }
 
@@ -1811,6 +1831,7 @@ FocusScope {
 
                         TextEdit {
                             id: textArea
+                            objectName: "millerPreviewText"
                             readOnly: true
                             selectByMouse: true
                             width: previewColumn.isMarkdown ? textPreviewFlick.width : Math.max(implicitWidth, textPreviewFlick.width)
@@ -1833,7 +1854,7 @@ FocusScope {
                             color: Theme.text
                             wrapMode: previewColumn.isMarkdown ? TextEdit.WrapAtWordBoundaryOrAnywhere : TextEdit.NoWrap
                             font.family: previewColumn.isMarkdown ? Qt.application.font.family : "monospace"
-                            font.pointSize: Theme.fontSmall - 1
+                            font.pointSize: (Theme.fontSmall - 1) * zoomControls.factor
 
                             onCursorRectangleChanged: {
                                 var r = cursorRectangle
@@ -1858,12 +1879,14 @@ FocusScope {
                     }
 
                     CsvTable {
+                        id: previewTable
+                        objectName: "millerPreviewTable"
                         anchors.fill: parent
                         anchors.margins: 6
                         visible: previewColumn.isText && previewColumn.isTable && !previewColumn.hasVisualPreview
                             && !previewColumn.previewIsDir && !previewColumn.isPdf && !previewColumn.isArchive
                         table: visible ? previewColumn.textPreview.table : ({})
-                        fontSize: Theme.fontSmall - 1
+                        fontSize: (Theme.fontSmall - 1) * zoomControls.factor
                     }
 
                     Text {

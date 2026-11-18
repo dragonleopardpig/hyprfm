@@ -60,12 +60,6 @@ QtObject {
         _debounce.stop()
         clear()
 
-        if (path === "") {
-            previewService.cancelPreview(requester)
-            loading = false
-            return
-        }
-
         // Dispatch even when there is no body to load: metadata alone costs
         // ~120 ms of exiftool/ffprobe and must not run on the GUI thread.
         loading = true
@@ -78,6 +72,14 @@ QtObject {
     property Timer _debounce: Timer {
         interval: 80
         onTriggered: {
+            // path is a dependent binding too: on the first Miller selection
+            // it can still be empty inside reload(). Inspect it here, alongside
+            // kind, once all bindings describe the new selection.
+            if (loader.path === "") {
+                previewService.cancelPreview(loader.requester)
+                loader.loading = false
+                return
+            }
             loader.loading = loader.kind !== ""
             previewService.requestPreview(loader.requester, loader.path, loader.kind,
                                           loader.password)

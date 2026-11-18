@@ -96,7 +96,7 @@ Window {
     property bool draftDependencyStartupCheck: config.dependencyStartupCheck
     property bool draftSidebarVisible: currentSidebarVisible
     // Must stay in sync with the quick-access entries in Sidebar.qml.
-    readonly property var quickAccessNames: ["Home", "Recents", "Trash", "Network", "Pictures", "Downloads"]
+    readonly property var quickAccessNames: ["Home", "Computer", "Recents", "Trash", "Network", "Pictures", "Downloads"]
     property var draftHiddenQuickAccess: config.hiddenQuickAccess
     property string draftSidebarPosition: config.sidebarPosition
     property string draftSplitOrientation: config.splitOrientation

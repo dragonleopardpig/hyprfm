@@ -13,6 +13,7 @@ set(HYPRFM_SOURCES
     models/bookmarkmodel.cpp
     models/filesystemmodel.cpp
     models/devicemodel.cpp
+    models/computermodel.cpp
     models/recentfilesmodel.cpp
     models/searchresultsmodel.cpp
     models/searchproxymodel.cpp
@@ -114,6 +115,7 @@ list(APPEND hyprfm_qml_module_args
         qml/components/Toolbar.qml
         qml/components/HoverRect.qml
         qml/views/FileViewContainer.qml
+        qml/views/ComputerView.qml
         qml/views/FileGridView.qml
         qml/views/FileCompactView.qml
         qml/views/FileDetailedView.qml
@@ -127,6 +129,8 @@ list(APPEND hyprfm_qml_module_args
         qml/components/RemoteConnectDialog.qml
         qml/components/PreviewLoader.qml
         qml/components/QuickPreview.qml
+        qml/components/PreviewZoomControls.qml
+        qml/components/ZoomablePreviewImage.qml
         qml/components/CsvTable.qml
         qml/components/Toast.qml
         qml/components/RubberBand.qml
