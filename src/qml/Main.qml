@@ -1047,6 +1047,9 @@ ApplicationWindow {
                 const selected = root.getSelectedPaths("secondary")
                 const view = root.activeSubView()
                 const cursorPath = view ? root.filePathFromModel(root.paneModel("secondary"), view.cursorIndex) : ""
+                // The primary pane takes over the secondary's folder; its own
+                // search or filter belonged to the folder it is leaving.
+                root.clearPaneSearch("primary")
                 tabModel.activeTab.navigateTo(tabModel.activeTab.secondaryCurrentPath)
                 root.setPaneRecents("primary", root.paneIsRecents("secondary"))
                 primaryFileViewContainer.restoreSelection(selected, cursorPath, tabModel.activeTab.currentPath)
@@ -1280,6 +1283,26 @@ ApplicationWindow {
                 items.push({ path: fp, isDir: isDirectoryFromModel(model, row) })
         }
         return items
+    }
+
+    // A folder Favourites can take: not empty, not a virtual place
+    // (Computer, Trash) and not already listed. Files never reach here.
+    function favouriteCandidate(path) {
+        if (!path || root.isComputerPath(path) || fileOps.isTrashPath(path) || bookmarks.containsPath(path))
+            return ""
+        return path
+    }
+    function addFavourite(path) {
+        if (!path || root.isComputerPath(path) || fileOps.isTrashPath(path))
+            return
+        const trimmed = path.replace(/\/+$/, "")
+        const name = trimmed.substring(trimmed.lastIndexOf("/") + 1) || path
+        if (bookmarks.containsPath(path))
+            toast.show("\u201c" + name + "\u201d is already in Favourites", "info")
+        else if (bookmarks.addBookmark(path))
+            toast.show("Added \u201c" + name + "\u201d to Favourites", "success")
+        else
+            toast.show("Only folders can be added to Favourites", "info")
     }
 
     function currentOrSelectedDirectoryPath() {
@@ -3419,6 +3442,8 @@ ApplicationWindow {
                     root.openPathInSplitView(path)
                 }
 
+                onAddFavouriteRequested: (path) => root.addFavourite(path)
+
                 onCustomActionRequested: (action) => {
                     if (action === "close_split")
                         root.toggleSplitView()
@@ -3594,8 +3619,20 @@ ApplicationWindow {
     }
 
     Shortcut {
+        sequence: config.shortcutMap["add_to_favourites"]
+        enabled: root.paneCommandsEnabled()
+        onActivated: root.addFavourite(root.currentOrSelectedDirectoryPath())
+    }
+
+    Shortcut {
         sequence: config.shortcutMap["open_in_split"]
-        onActivated: root.openPathInSplitView(root.currentOrSelectedDirectoryPath())
+        // No target (e.g. an unmounted or several drives selected in
+        // Computer) means nothing to open, as for open_in_new_tab; an empty
+        // path would make openPathInSplitView fall back to the pane itself.
+        onActivated: {
+            const path = root.currentOrSelectedDirectoryPath()
+            if (path) root.openPathInSplitView(path)
+        }
     }
 
     // Navigation
@@ -3744,17 +3781,21 @@ ApplicationWindow {
         enabled: root.paneCommandsEnabled() && !root.previewOwnsFocus()
         onActivated: root.transferToOtherPane(true)
     }
+    // Interface text size. A focused preview zooms itself with the same keys
+    // (PreviewZoomControls), and editors, the terminal and dialogs keep them.
     Shortcut {
         sequences: [config.shortcutMap["text_larger"], "Ctrl+="]
+        enabled: root.paneCommandsEnabled() && !root.previewOwnsFocus()
         onActivated: primaryFileViewContainer.interfaceZoom.adjust(1)
     }
     Shortcut {
         sequence: config.shortcutMap["text_smaller"]
+        enabled: root.paneCommandsEnabled() && !root.previewOwnsFocus()
         onActivated: primaryFileViewContainer.interfaceZoom.adjust(-1)
     }
     Shortcut {
         sequence: config.shortcutMap["text_reset"]
-        enabled: !root.previewOwnsFocus()
+        enabled: root.paneCommandsEnabled() && !root.previewOwnsFocus()
         onActivated: primaryFileViewContainer.interfaceZoom.reset()
     }
     Shortcut {
@@ -4174,6 +4215,11 @@ ApplicationWindow {
         menu.targetPath = filePath !== "" ? filePath : currentDir
         menu.targetIsDir = filePath !== "" ? isDirectory : true
         menu.isEmptySpace = (filePath === "")
+        // A folder row offers itself; empty space offers the folder shown,
+        // except in Recents and search results, which are not one folder.
+        menu.favouritePath = filePath !== ""
+            ? (isDirectory ? root.favouriteCandidate(filePath) : "")
+            : (root.paneIsRecents(pane) || root.paneSearchMode(pane) ? "" : root.favouriteCandidate(currentDir))
         var sel = getSelectedPaths(pane)
         menu.selectedPaths = (sel.length > 1) ? sel : (filePath !== "" ? [filePath] : [])
         var selectedItems = getSelectedItems(pane)
