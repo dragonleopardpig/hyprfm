@@ -909,6 +909,41 @@ private slots:
         QVERIFY(uris[0] != uris[1]);
         QVERIFY(!QFileInfo::exists(QUrl(uris[0].toString()).toLocalFile()));
     }
+    // #74: an unreadable folder shows why in the view, not an empty grid.
+    void testUnreadableFolderShowsLoadError()
+    {
+        App app;
+        QVERIFY(app.load());
+
+        QTemporaryDir dir;
+        const QString locked = dir.path() + "/locked";
+        QVERIFY(QDir().mkpath(locked));
+        QVERIFY(QFile::setPermissions(locked, QFileDevice::Permissions()));
+        auto restore = qScopeGuard([&] {
+            QFile::setPermissions(locked, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+        });
+        if (QDir(locked).isReadable())
+            QSKIP("running as root: permissions are not enforced");
+
+        QQuickItem *view = app.item(QStringLiteral("primaryFileView"));
+        QVERIFY(view);
+        QQuickItem *errorText = view->findChild<QQuickItem *>(QStringLiteral("loadErrorText"));
+        QVERIFY(errorText);
+
+        app.tabModel->activeTab()->navigateTo(locked);
+        QTRY_VERIFY(errorText->isVisible());
+        QVERIFY(errorText->property("text").toString().contains(QStringLiteral("permission")));
+
+        // The Computer page lists drives, not a folder: the error the file
+        // model still holds from the locked folder must not cover it.
+        app.tabModel->activeTab()->navigateTo(QStringLiteral("computer:///"));
+        QTRY_VERIFY(app.item("computerView") && app.item("computerView")->isVisible());
+        QVERIFY(!errorText->isVisible());
+
+        app.tabModel->activeTab()->navigateTo(dir.path());
+        QTRY_VERIFY(!errorText->isVisible());
+    }
+
     // Search results land in the proxy, but the view and the status bar have
     // to show them: the grid is bound to the proxy through paneModel() and
     // the item count reads the proxy's rowCount().
@@ -961,6 +996,14 @@ private slots:
             QTest::qWait(800);   // let the add transition finish
             app.window->grabWindow().save(qEnvironmentVariable("HYPRFM_TEST_GRAB"));
         }
+
+        // #72: emptying the field keeps search open but shows the folder
+        // again (4 entries), not the cleared results.
+        QVERIFY(QMetaObject::invokeMethod(app.window, "handleSearchQuery",
+                                          Q_ARG(QVariant, QString())));
+        QVERIFY(app.window->property("searchMode").toBool());
+        QTRY_COMPARE(grid->property("count").toInt(), 4);
+        QTRY_COMPARE(statusBar->property("itemCount").toInt(), 4);
     }
 
     // Clicking the current folder or the empty space in the breadcrumb edits
@@ -1143,6 +1186,195 @@ private slots:
         QCOMPARE(dropdown->property("currentIndex").toInt(), otherIndex);
     }
 
+    // The list used to be its own native window placed by screen
+    // coordinates, which Wayland does not expose: on GNOME it opened far
+    // below the field. It now lives in the settings window, right under the
+    // field, and opening a second dropdown closes the first.
+    void testSettingsDropdownOpensAtItsFieldAndClosesTheOther()
+    {
+        App app;
+        QVERIFY(app.load());
+        QVERIFY(QMetaObject::invokeMethod(app.window, "openSettingsPanel"));
+        auto *panel = qobject_cast<QQuickWindow *>(
+            app.window->findChild<QObject *>(QStringLiteral("settingsPanel")));
+        QVERIFY(panel);
+        QTRY_VERIFY(panel->isExposed());
+
+        QList<QQuickItem *> dropdowns;
+        for (QQuickItem *item : app.window->findChildren<QQuickItem *>()) {
+            if (item->metaObject()->indexOfProperty("dropdownOpen") >= 0
+                && item->window() == panel && item->isVisible() && item->width() > 0)
+                dropdowns.append(item);
+        }
+        // Top to bottom.
+        std::sort(dropdowns.begin(), dropdowns.end(), [](QQuickItem *a, QQuickItem *b) {
+            return a->mapToScene(QPointF()).y() < b->mapToScene(QPointF()).y();
+        });
+        QVERIFY2(dropdowns.size() >= 2, "the first settings page has two dropdowns");
+        // Open the lower one first: its list hangs below it, so the upper
+        // field stays clickable.
+        QQuickItem *first = dropdowns.at(1);
+        QQuickItem *second = dropdowns.at(0);
+        auto popupOf = [](QQuickItem *d) { return d->findChild<QObject *>(QStringLiteral("dropdownPopup")); };
+        QObject *firstPopup = popupOf(first);
+        QObject *secondPopup = popupOf(second);
+        QVERIFY(firstPopup && secondPopup);
+
+        // The field is the right-hand part of the row; click near its end.
+        auto fieldPoint = [](QQuickItem *d) {
+            return d->mapToScene(QPointF(d->width() - 20, 17)).toPoint();
+        };
+
+        if (qEnvironmentVariableIsSet("HYPRFM_TEST_GRAB")) {
+            QTest::qWait(300);
+            panel->grabWindow().save(qEnvironmentVariable("HYPRFM_TEST_GRAB") + QStringLiteral("-dropdown-closed.png"));
+        }
+
+        QTest::mouseClick(panel, Qt::LeftButton, {}, fieldPoint(first));
+        QTRY_VERIFY(firstPopup->property("opened").toBool());
+        // Right under the field: field bottom (34) plus the 6 px gap, or above it.
+        const qreal y = firstPopup->property("y").toReal();
+        const qreal h = firstPopup->property("height").toReal();
+        QVERIFY2(qFuzzyCompare(y, 40.0) || qFuzzyCompare(y, -h - 6),
+                 qPrintable(QStringLiteral("popup y %1").arg(y)));
+
+        if (qEnvironmentVariableIsSet("HYPRFM_TEST_GRAB")) {
+            QTest::qWait(300);
+            panel->grabWindow().save(qEnvironmentVariable("HYPRFM_TEST_GRAB") + QStringLiteral("-dropdown.png"));
+        }
+
+        // One click on the other field closes this one and opens that one.
+        QTest::mouseClick(panel, Qt::LeftButton, {}, fieldPoint(second));
+        QTRY_VERIFY(secondPopup->property("opened").toBool());
+        QTRY_VERIFY(!firstPopup->property("visible").toBool());
+        QVERIFY(!first->property("dropdownOpen").toBool());
+
+        // Clicking its own field again closes it.
+        QTest::mouseClick(panel, Qt::LeftButton, {}, fieldPoint(second));
+        QTRY_VERIFY(!secondPopup->property("visible").toBool());
+        QVERIFY(!second->property("dropdownOpen").toBool());
+
+        // And it opens again after closing itself.
+        QTest::mouseClick(panel, Qt::LeftButton, {}, fieldPoint(second));
+        QTRY_VERIFY(secondPopup->property("opened").toBool());
+        QTest::keyClick(panel, Qt::Key_Escape);
+        QTRY_VERIFY(!secondPopup->property("visible").toBool());
+        QVERIFY(!second->property("dropdownOpen").toBool());
+
+        // Clicking a row picks it. A press on the list once counted as
+        // outside the field and closed the list before the click landed.
+        QTest::mouseClick(panel, Qt::LeftButton, {}, fieldPoint(second));
+        QTRY_VERIFY(secondPopup->property("opened").toBool());
+        QSignalSpy picked(second, SIGNAL(selected(int,QString)));
+        const int before = second->property("currentIndex").toInt();
+        const int target = before == 0 ? 1 : 0;
+        QQuickItem *list = secondPopup->property("contentItem").value<QQuickItem *>();
+        QVERIFY(list);
+        QTest::qWait(250);   // let the open animation settle
+        // Rows are 32 px under a 5 px margin, scrolled so the current one is
+        // centred; find the target row's delegate instead of guessing.
+        QQuickItem *row = nullptr;
+        std::function<void(QQuickItem *)> walk = [&](QQuickItem *item) {
+            if (item->property("modelData").isValid() && item->property("index").toInt() == target
+                && item->isVisible())
+                row = item;
+            for (QQuickItem *child : item->childItems())
+                walk(child);
+        };
+        walk(list);
+        QVERIFY(row);
+        QTest::mouseClick(panel, Qt::LeftButton, {},
+                          row->mapToScene(QPointF(row->width() / 2, row->height() / 2)).toPoint());
+        QTRY_COMPARE(picked.count(), 1);
+        QCOMPARE(picked.at(0).at(0).toInt(), target);
+        QTRY_VERIFY(!secondPopup->property("visible").toBool());
+
+        // The top dropdown is Theme: the pick has to reach the config.
+        auto *config = app.engine.rootContext()->contextProperty("config").value<QObject *>();
+        QTRY_COMPARE(config->property("theme").toString(), picked.at(0).at(1).toString());
+    }
+
+    // "Default sort" sits low on the Layout page. Its list has to open inside
+    // the settings window, flipping above the field when there is no room.
+    void testLowSettingsDropdownStaysInsideTheWindow()
+    {
+        App app;
+        QVERIFY(app.load());
+        QVERIFY(QMetaObject::invokeMethod(app.window, "openSettingsPanel"));
+        auto *panel = qobject_cast<QQuickWindow *>(
+            app.window->findChild<QObject *>(QStringLiteral("settingsPanel")));
+        QVERIFY(panel);
+        QTRY_VERIFY(panel->isExposed());
+        QVERIFY(QMetaObject::invokeMethod(panel, "showSection", Q_ARG(QVariant, 1)));
+
+        QQuickItem *sort = nullptr;
+        QTRY_VERIFY([&] {
+            for (QQuickItem *item : app.window->findChildren<QQuickItem *>()) {
+                if (item->window() == panel && item->property("label").toString() == QLatin1String("Default sort"))
+                    sort = item;
+            }
+            return sort != nullptr;
+        }());
+        // Bring it to the bottom edge of the page, the worst case.
+        QQuickItem *flick = sort->parentItem();
+        while (flick && flick->metaObject()->indexOfProperty("contentY") < 0)
+            flick = flick->parentItem();
+        QVERIFY(flick);
+        const qreal sortY = sort->mapToItem(flick->property("contentItem").value<QQuickItem *>(), QPointF()).y();
+        flick->setProperty("contentY", qMax<qreal>(0, sortY + sort->height() - flick->height()));
+        QTRY_VERIFY(sort->mapToScene(QPointF(0, sort->height())).y() <= panel->height());
+
+        QTest::mouseClick(panel, Qt::LeftButton, {},
+                          sort->mapToScene(QPointF(sort->width() - 20, 17)).toPoint());
+        auto *popup = sort->findChild<QObject *>(QStringLiteral("dropdownPopup"));
+        QVERIFY(popup);
+        QTRY_VERIFY(popup->property("opened").toBool());
+        QQuickItem *content = popup->property("contentItem").value<QQuickItem *>();
+        QVERIFY(content);
+        const QRectF inScene = content->mapRectToScene(QRectF(0, 0, content->width(), content->height()));
+        QVERIFY2(inScene.top() >= 0 && inScene.bottom() <= panel->height(),
+                 qPrintable(QStringLiteral("popup %1..%2 in a %3 tall window")
+                                .arg(inScene.top()).arg(inScene.bottom()).arg(panel->height())));
+        if (qEnvironmentVariableIsSet("HYPRFM_TEST_GRAB")) {
+            QTest::qWait(300);
+            panel->grabWindow().save(qEnvironmentVariable("HYPRFM_TEST_GRAB") + QStringLiteral("-sort.png"));
+        }
+    }
+
+    // Picking the dark half of the pair while in dark mode (or the light half
+    // in light mode) is picking the theme on screen, so it applies at once.
+    void testPickingTheActiveHalfOfThePairAppliesIt()
+    {
+        App app;
+        QVERIFY(app.load());
+        QVERIFY(QMetaObject::invokeMethod(app.window, "openSettingsPanel"));
+        QObject *panel = app.window->findChild<QObject *>(QStringLiteral("settingsPanel"));
+        QVERIFY(panel);
+        auto *config = app.engine.rootContext()->contextProperty("config").value<QObject *>();
+
+        QQuickItem *dark = nullptr;
+        QQuickItem *light = nullptr;
+        for (QQuickItem *item : app.window->findChildren<QQuickItem *>()) {
+            if (item->property("label").toString() == QLatin1String("Dark theme")) dark = item;
+            if (item->property("label").toString() == QLatin1String("Light theme")) light = item;
+        }
+        QVERIFY(dark && light);
+
+        const bool darkMode = panel->property("draftDarkMode").toBool();
+        QQuickItem *active = darkMode ? dark : light;
+        QQuickItem *other = darkMode ? light : dark;
+        const QString before = config->property("theme").toString();
+
+        // The other half only changes the pair.
+        QVERIFY(QMetaObject::invokeMethod(other, "selected", Q_ARG(int, 0),
+                                          Q_ARG(QString, QStringLiteral("nord"))));
+        QCOMPARE(config->property("theme").toString(), before);
+
+        QVERIFY(QMetaObject::invokeMethod(active, "selected", Q_ARG(int, 0),
+                                          Q_ARG(QString, QStringLiteral("dracula"))));
+        QTRY_COMPARE(config->property("theme").toString(), QStringLiteral("dracula"));
+    }
+
     // Issue #13: menus used a fixed width, so long rows overflowed the popup.
     void testContextMenuWidensForLongLabels()
     {
@@ -1278,6 +1510,46 @@ private slots:
         QTRY_VERIFY2(container->property("opacity").toReal() > 0.99,
                      qPrintable(QStringLiteral("re-opened menu opacity %1")
                                     .arg(container->property("opacity").toReal())));
+    }
+
+    // A right-click outside an open menu closes it and passes on to the view,
+    // which asks for the menu again. The same target must stay closed (a
+    // second right-click toggles the menu off); a different target reopens.
+    // Only the press is sent before popup(): the release would let the real
+    // view under the cursor open its own menu and muddle the check.
+    void testRightClickSameTargetClosesMenu()
+    {
+        App app;
+        QVERIFY(app.load());
+        QVERIFY(app.item("contextMenuLoader")->setProperty("active", true));
+        QQuickItem *menu = app.item("contextMenu");
+        QVERIFY(menu);
+        QQuickItem *container = app.item("contextMenuContainer");
+        QVERIFY(container);
+
+        auto open = [&](const QString &target) {
+            menu->setProperty("targetPath", target);
+            menu->setProperty("isEmptySpace", false);
+            return QMetaObject::invokeMethod(menu, "popup", Q_ARG(QVariant, 20), Q_ARG(QVariant, 20));
+        };
+        const QPoint outside(app.window->width() - 40, app.window->height() - 40);
+
+        QVERIFY(open("/tmp/a"));
+        QTRY_COMPARE(container->property("opacity").toReal(), 1.0);
+        QTest::mousePress(app.window, Qt::RightButton, {}, outside);
+        QVERIFY(open("/tmp/a"));
+        QTRY_VERIFY(!menu->isVisible());
+        QTest::mouseRelease(app.window, Qt::RightButton, {}, outside);
+
+        app.item("contextMenuLoader")->setProperty("active", true);
+        QVERIFY(open("/tmp/a"));
+        QTRY_COMPARE(container->property("opacity").toReal(), 1.0);
+        QTest::mousePress(app.window, Qt::RightButton, {}, outside);
+        QVERIFY(open("/tmp/b"));
+        QTRY_COMPARE(container->property("opacity").toReal(), 1.0);
+        QVERIFY(menu->isVisible());
+        QCOMPARE(menu->property("targetPath").toString(), QStringLiteral("/tmp/b"));
+        QTest::mouseRelease(app.window, Qt::RightButton, {}, outside);
     }
 
     // The late-relayout guard in ContextMenu's onHeightChanged only runs once
@@ -1830,6 +2102,21 @@ private slots:
                                           Q_ARG(QVariant, QVariant()), Q_ARG(QVariant, QVariant())));
         QCOMPARE(app.bookmarks->rowCount(), 0);
         QVERIFY(app.bookmarks->savedSplits().isEmpty());
+    }
+
+    // #69: "Empty Trash" in the sidebar's Trash menu did nothing.
+    void testSidebarEmptyTrashAsksForConfirmation()
+    {
+        App app;
+        QVERIFY(app.load());
+        QVERIFY(app.item("sidebarContextMenuLoader")->setProperty("active", true));
+        QObject *menu = app.item("sidebarContextMenuLoader")->property("item").value<QObject *>();
+        QVERIFY(menu);
+        QVERIFY(menu->setProperty("sidebarItem", QVariantMap{{"kind", "quickAccess"}, {"path", "trash:///"}}));
+        QVERIFY(QMetaObject::invokeMethod(menu, "executeAction",
+                                          Q_ARG(QVariant, QStringLiteral("emptytrash")),
+                                          Q_ARG(QVariant, QVariant()), Q_ARG(QVariant, QVariant())));
+        QVERIFY(app.item("emptyTrashConfirmDialogLoader")->property("active").toBool());
     }
 
     void testClickingPathBarEditsAndEscapeCancels()
@@ -2463,6 +2750,36 @@ private slots:
         QTRY_COMPARE(app.tabModel->activeTab()->secondaryCurrentPath(), other);
     }
 
+    // Opening a split in the other orientation used to animate the side-by-side
+    // to stacked fold while the new pane grew in, so a horizontal split first
+    // appeared on the right and then dropped down. With no split on screen the
+    // orientation must jump, so the pane grows in from below from the start.
+    void testOpeningHorizontalSplitDoesNotFold()
+    {
+        App app;
+        QVERIFY(app.load());
+        auto *tab = app.tabModel->activeTab();
+        QVERIFY(tab && !tab->splitViewEnabled());
+        auto *frame = app.item("primaryPaneFrame");
+        QVERIFY(frame && frame->parentItem());
+        QQuickItem *paneRow = frame->parentItem();
+        QCOMPARE(paneRow->property("orientationProgress").toReal(), 0.0);
+
+        QVERIFY(QMetaObject::invokeMethod(app.window, "toggleSplitInOrientation",
+                                          Q_ARG(QVariant, QStringLiteral("horizontal"))));
+        QVERIFY(tab->splitViewEnabled());
+        QCOMPARE(paneRow->property("orientationProgress").toReal(), 1.0);
+        auto *secondary = app.item("secondaryPaneLoader");
+        QVERIFY(secondary);
+        QCOMPARE(secondary->x(), 0.0);
+
+        // A split already on screen still folds when its orientation changes.
+        QTRY_COMPARE(app.window->property("splitTransitionProgress").toReal(), 1.0);
+        QVERIFY(QMetaObject::invokeMethod(app.window, "toggleSplitOrientation"));
+        QTRY_VERIFY(paneRow->property("orientationProgress").toReal() < 1.0
+                    && paneRow->property("orientationProgress").toReal() > 0.0);
+    }
+
     void testActiveSplitAppearsInSidebarUntilSaved()
     {
         App app;
@@ -2596,6 +2913,49 @@ private slots:
             QTest::qWait(600);
             window->grabWindow().save(prefix + QStringLiteral("-wide-again.png"));
         }
+    }
+
+    void testSidebarHeaderChoices()
+    {
+        App app;
+        QVERIFY(app.load());
+        QQuickWindow *window = app.window;
+        auto *config = app.engine.rootContext()->contextProperty("config").value<QObject *>();
+        QQuickItem *root = window->contentItem();
+        QQuickItem *header = App::findItem(root, QStringLiteral("sidebarHeader"));
+        QQuickItem *title = App::findItem(root, QStringLiteral("sidebarTitle"));
+        QQuickItem *logo = App::findItem(root, QStringLiteral("sidebarLogo"));
+        QQuickItem *toggle = App::findItem(root, QStringLiteral("sidebarToggleButton"));
+        QVERIFY(header && title && logo && toggle);
+
+        auto choose = [&](const char *value) {
+            QVariantMap settings;
+            settings.insert(QStringLiteral("sidebarHeader"), QString::fromLatin1(value));
+            QMetaObject::invokeMethod(config, "saveSettings", Q_ARG(QVariantMap, settings));
+        };
+
+        QVERIFY(header->isVisible() && title->isVisible() && !logo->isVisible());
+        QVERIFY(!toggle->property("shown").toBool());
+
+        choose("logo");
+        QTRY_VERIFY(logo->isVisible());
+        QVERIFY(header->isVisible() && !title->isVisible());
+        QTRY_VERIFY(logo->property("status").toInt() == 1);   // Image.Ready
+
+        choose("button");
+        QTRY_VERIFY(!logo->isVisible());
+        QVERIFY(header->isVisible() && !title->isVisible());
+        QVERIFY(!toggle->property("shown").toBool());
+
+        // No header: the toolbar button closes the sidebar, and opens it again.
+        choose("none");
+        QTRY_VERIFY(!header->isVisible());
+        QVERIFY(toggle->property("shown").toBool());
+        QVERIFY(window->property("sidebarVisible").toBool());
+        QMetaObject::invokeMethod(toggle, "clicked");
+        QTRY_VERIFY(!window->property("sidebarVisible").toBool());
+        QMetaObject::invokeMethod(toggle, "clicked");
+        QTRY_VERIFY(window->property("sidebarVisible").toBool());
     }
 
     void testStatusBarDiskMeterTracksUsage()

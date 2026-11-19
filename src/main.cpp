@@ -35,6 +35,7 @@
 #endif
 
 #include "services/configmanager.h"
+#include "services/desktopcolorscheme.h"
 #include "services/filepicker.h"
 #include "services/themeloader.h"
 #include "services/fileoperations.h"
@@ -268,6 +269,12 @@ public:
             return;
         }
         if (fields.at(1) != "vulkan")
+            return;
+        // The cache is shared by every HyprFM build on the machine: a Nix or
+        // Flatpak copy brings its own Vulkan loader, while an AppImage on a
+        // host without libvulkan would ask Qt for Vulkan and crash. Left open:
+        // Qt loads the same library next.
+        if (!dlopen("libvulkan.so.1", RTLD_NOW | RTLD_LOCAL))
             return;
 
         QDir().mkpath(m_dir);
@@ -557,37 +564,6 @@ palette = [
 
 } // namespace
 
-
-// org.freedesktop.appearance color-scheme: 0 no preference, 1 dark, 2 light.
-// Published by xdg-desktop-portal, which is what desktop shells write to when
-// the user flips light/dark, so it is available even when Qt cannot see it.
-static bool desktopPrefersLight()
-{
-    QDBusInterface portal(QStringLiteral("org.freedesktop.portal.Desktop"),
-                          QStringLiteral("/org/freedesktop/portal/desktop"),
-                          QStringLiteral("org.freedesktop.portal.Settings"),
-                          QDBusConnection::sessionBus());
-    if (portal.isValid()) {
-        const QDBusReply<QDBusVariant> reply =
-            portal.call(QStringLiteral("Read"), QStringLiteral("org.freedesktop.appearance"),
-                        QStringLiteral("color-scheme"));
-        if (reply.isValid()) {
-            // The portal answers with a variant wrapping a variant, so the
-            // inner one has to be unwrapped or the conversion quietly yields 0
-            // and this falls through to Qt for no reason.
-            bool ok = false;
-            QVariant value = reply.value().variant();
-            if (value.canConvert<QDBusVariant>())
-                value = value.value<QDBusVariant>().variant();
-            const uint scheme = value.toUInt(&ok);
-            if (ok && scheme != 0)
-                return scheme == 2;
-        }
-    }
-    // No portal, or it has no preference: trust Qt when it knows, else assume
-    // dark, which is what this defaulted to before the portal was consulted.
-    return QGuiApplication::styleHints()->colorScheme() == Qt::ColorScheme::Light;
-}
 
 int main(int argc, char *argv[])
 {
@@ -899,18 +875,12 @@ int main(int argc, char *argv[])
     if (themesDir.isEmpty())
         qWarning() << "HyprFM: unable to locate themes directory";
 
-    // Only used the first time, while config.toml has no "theme": pick the
-    // bundled theme that matches the desktop rather than always landing on the
-    // dark one. Qt's own colorScheme() is not enough here -- it reports Unknown
-    // under platform themes that do not forward the portal setting (qt6ct,
-    // Kvantum), which is a common Hyprland setup -- so ask the portal directly
-    // and fall back to Qt, then to dark.
-    const QString systemDefaultTheme = desktopPrefersLight()
-        ? QStringLiteral("catppuccin-latte")
-        : QStringLiteral("catppuccin-mocha");
+    // Only matters while config.toml has no "theme": then the light_theme or
+    // dark_theme of the pair is used, whichever matches the desktop.
+    const bool desktopDark = DesktopColorScheme::prefersDark();
 
     // Create backend instances
-    ConfigManager *config = new ConfigManager(configPath, &app, themeDirs, systemDefaultTheme);
+    ConfigManager *config = new ConfigManager(configPath, &app, themeDirs, desktopDark);
     mark("ConfigManager loaded");
     app.setFont(resolveUiFont(config->fontFamily()));
     new UiFontGuard(&app, [&]() { return resolveUiFont(config->fontFamily()); });
@@ -919,6 +889,8 @@ int main(int argc, char *argv[])
         qDebug().nospace() << "[startup] ui font " << uiFont.family() << ' '
                            << uiFont.pointSizeF() << "pt (desktop: " << desktop.fontFamily
                            << ' ' << desktop.fontPointSize << ", icons: " << config->iconTheme() << ')';
+        qDebug().nospace() << "[startup] theme " << config->theme()
+                           << " (desktop " << (desktopDark ? "dark" : "light") << ')';
     }
     ThemeLoader *theme = new ThemeLoader(&app);
     theme->loadTheme(config->theme(), themeDirs);
@@ -1067,7 +1039,10 @@ int main(int argc, char *argv[])
     // with NO_CACHEGEN dropped SettingsPanel.qml from it in v0.4.14).
     mark("engine.load start");
     QQmlComponent mainComponent(&engine);
-    mainComponent.loadFromModule("HyprFM", pickerRequestPath.isEmpty() ? "Main" : "FilePicker");
+    // Qt 6.7 can resolve the installed module without exposing every root type.
+    mainComponent.loadUrl(QUrl(pickerRequestPath.isEmpty()
+        ? QStringLiteral("qrc:/HyprFM/qml/Main.qml")
+        : QStringLiteral("qrc:/HyprFM/qml/FilePicker.qml")));
     const QString installedMainQml = dataDir.isEmpty()
         ? QString()
         : QDir(dataDir).filePath(pickerRequestPath.isEmpty() ? QStringLiteral("HyprFM/qml/Main.qml") : QStringLiteral("HyprFM/qml/FilePicker.qml"));
@@ -1086,8 +1061,13 @@ int main(int argc, char *argv[])
             return;
 
 #ifdef HYPRFM_HAS_KWINDOWSYSTEM
-        // KWin blur only shows through translucent content; Hyprland keeps
-        // using compositor rules against the same transparent window surface.
+        // KWin blur only shows through translucent content. Hyprland blurs the
+        // window through its own rules, and since 0.57 it also advertises
+        // ext-background-effect, so KWindowEffects reports blur as available;
+        // requesting it there replaced Hyprland's blur with none after the
+        // first config change (a sidebar resize, a theme switch). Leave it be.
+        if (!qEnvironmentVariableIsEmpty("HYPRLAND_INSTANCE_SIGNATURE"))
+            return;
         const bool blurRequested = config->transparencyEnabled();
         const bool blurAvailable = KWindowEffects::isEffectAvailable(KWindowEffects::BlurBehind);
         KWindowEffects::enableBlurBehind(window, blurRequested && blurAvailable);

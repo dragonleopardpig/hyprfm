@@ -87,6 +87,7 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           version: '6.7.3'
+          arch: linux_gcc_64
           # Note: 'qtwayland' is NOT a separate module for linux desktop in
           # aqtinstall — on Linux the Wayland platform plugin (libqwayland-
           # generic.so / libqwayland-egl.so) ships with the base Qt install.
@@ -98,8 +99,14 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            build-essential \
             cmake \
             ninja-build \
+            pkg-config \
+            python3-gi \
+            libglib2.0-dev \
+            libfontconfig1-dev \
+            libfreetype6-dev \
             libgl-dev \
             libxkbcommon-dev \
             libdbus-1-dev \
@@ -107,6 +114,16 @@ jobs:
             libegl-dev \
             libgles-dev \
             libvulkan-dev \
+            libxcb-cursor0 \
+            libx11-xcb-dev \
+            libxcb-icccm4 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-render-util0 \
+            libxcb-shape0 \
+            libxcb-xinerama0 \
+            libxcb-xkb1 \
+            libxkbcommon-x11-0 \
             wayland-protocols \
             xdg-utils \
             file \
@@ -114,7 +131,15 @@ jobs:
             libglib2.0-bin \
             gvfs \
             dbus \
-            p7zip-full
+            p7zip-full \
+            zip \
+            unzip \
+            zstd \
+            libarchive-tools \
+            shared-mime-info \
+            fd-find \
+            bat \
+            poppler-utils
 
       # Markdown previews shell out to `md2html`. Debian and Ubuntu package
       # md4c's *libraries* (libmd4c0, libmd4c-dev, libmd4c-html0) but never
@@ -180,11 +205,16 @@ jobs:
           # files into the binary. The NO_CACHEGEN code path in Qt 6.7.3 was
           # silently dropping qml/components/SettingsPanel.qml from the qrc;
           # cachegen uses a different rcc path that's more reliable.
+          # OpenGL_GL_PREFERENCE=LEGACY: link libGL.so.1 like the bundled Qt
+          # does. GLVND would add libOpenGL.so.0, which AppImages never bundle
+          # and a plain libgl1 system (the 22.04 smoke test) does not have.
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX=/usr \
             -DHYPRFM_DATA_DIR=/usr/share/hyprfm \
-            -DHYPRFM_ENABLE_QML_CACHEGEN=ON
+            -DHYPRFM_TERMINAL=ON \
+            -DHYPRFM_ENABLE_QML_CACHEGEN=ON \
+            -DOpenGL_GL_PREFERENCE=LEGACY
           cmake --build build --parallel
 
       - name: Run tests
@@ -224,12 +254,15 @@ jobs:
           # Force linuxdeploy-plugin-qt to bundle the Wayland platform plugin
           # alongside xcb. Without this, Ubuntu's GNOME Wayland session loads
           # an empty platform and the window renders black.
-          EXTRA_PLATFORM_PLUGINS: libqwayland-generic.so;libqwayland-egl.so
+          EXTRA_PLATFORM_PLUGINS: libqoffscreen.so;libqminimal.so;libqwayland-generic.so;libqwayland-egl.so
           QML_SOURCES_PATHS: src/qml
         run: |
           set -euo pipefail
           QT_PLUGIN_DIR=$(qmake6 -query QT_INSTALL_PLUGINS 2>/dev/null || qmake -query QT_INSTALL_PLUGINS)
+          QT_LIB_DIR=$(qmake6 -query QT_INSTALL_LIBS 2>/dev/null || qmake -query QT_INSTALL_LIBS)
+          export LD_LIBRARY_PATH="$QT_LIB_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
+          install -m755 dist/AppRun AppDir/AppRun
           ./linuxdeploy-x86_64.AppImage \
             --appdir AppDir \
             --plugin qt \
@@ -256,13 +289,26 @@ jobs:
           echo "=== wayland-graphics-integration-client ==="
           ls AppDir/usr/plugins/wayland-graphics-integration-client/ || true
 
-          scripts/prune-appdir.sh AppDir
+          if [ ${#deploy_deps_args[@]} -gt 0 ]; then
+            ./linuxdeploy-x86_64.AppImage --appdir AppDir "${deploy_deps_args[@]}"
+          fi
 
-          OUTPUT="HyprFM-${TAG_NAME}-x86_64.AppImage" \
-          ./linuxdeploy-x86_64.AppImage \
-            --appdir AppDir \
-            "${deploy_deps_args[@]}" \
-            --output appimage
+          # Prune after the last linuxdeploy call and package with appimagetool:
+          # `linuxdeploy --output appimage` redeploys and copies the pruned
+          # host libraries (glib, dbus, xkbcommon, ...) back. appimagetool is
+          # the one inside the checksummed linuxdeploy.
+          scripts/prune-appdir.sh AppDir
+          ./linuxdeploy-x86_64.AppImage --appimage-extract >/dev/null
+          # Update information lets AppImageUpdate (and Gear Lever etc.) fetch
+          # only the changed blocks of the newest release. appimagetool also
+          # writes the matching .zsync, which the release uploads beside it.
+          ARCH=x86_64 squashfs-root/plugins/linuxdeploy-plugin-appimage/appimagetool-prefix/AppRun \
+            -u "gh-releases-zsync|soyeb-jim285|hyprfm|latest|HyprFM-*-x86_64.AppImage.zsync" \
+            AppDir "HyprFM-${TAG_NAME}-x86_64.AppImage"
+          rm -rf squashfs-root
+          test -s "HyprFM-${TAG_NAME}-x86_64.AppImage.zsync"
+          "./HyprFM-${TAG_NAME}-x86_64.AppImage" --appimage-updateinformation | tee /dev/stderr \
+            | grep -qx "gh-releases-zsync|soyeb-jim285|hyprfm|latest|HyprFM-\*-x86_64.AppImage.zsync"
 
       - name: Verify bundled Wayland client integrations
         if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
@@ -285,6 +331,7 @@ jobs:
                   | xargs -r objdump -T 2>/dev/null || true) \
                 | grep -o 'GLIBC_[0-9.]*' | sort -Vu | tail -1)
           echo "Newest glibc symbol needed: $max"
+          test -n "$max" || { echo "::error::No glibc symbols found in AppDir"; exit 1; }
           if [ "$(printf '%s\n' GLIBC_2.35 "$max" | sort -V | tail -1)" != GLIBC_2.35 ]; then
             echo "::error::The AppImage needs $max, newer than Ubuntu 22.04's GLIBC_2.35"
             exit 1
@@ -303,9 +350,14 @@ jobs:
         # such gate; never again.
         run: |
           chmod +x "HyprFM-${TAG_NAME}-x86_64.AppImage"
+          smoke_dir=$(mktemp -d)
+          trap 'rm -rf "$smoke_dir"' EXIT
           set +e
-          # offscreen platform needs no display; software RHI dodges Mesa.
-          QT_QPA_PLATFORM=offscreen QSG_RHI_BACKEND=software \
+          # Offscreen needs no display; Qt Quick's software renderer dodges Mesa.
+          env -u LD_LIBRARY_PATH -u QT_PLUGIN_PATH -u QML_IMPORT_PATH -u QML2_IMPORT_PATH \
+            XDG_RUNTIME_DIR="$smoke_dir" XDG_CONFIG_HOME="$smoke_dir/config" \
+            XDG_CACHE_HOME="$smoke_dir/cache" \
+            QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
             timeout 10 "./HyprFM-${TAG_NAME}-x86_64.AppImage" \
             > smoke.stdout 2> smoke.stderr &
           SMOKE_PID=$!
@@ -334,12 +386,97 @@ jobs:
           fi
           echo "Smoke test passed."
 
+      - name: Smoke-test without the build host's Qt installation
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          docker run --rm \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/HyprFM-${TAG_NAME}-x86_64.AppImage,target=/opt/hyprfm.AppImage,readonly" \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/tests/tst_filepicker_startup.py,target=/opt/tst_filepicker_startup.py,readonly" \
+            ubuntu:22.04 bash -euc '
+              apt-get update -o Acquire::Retries=3
+              DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+                libgl1 libegl1 libglib2.0-0 libfontconfig1 libxkbcommon0 libdbus-1-3 fonts-dejavu-core python3
+              mkdir -m700 /tmp/hyprfm-runtime
+              export XDG_RUNTIME_DIR=/tmp/hyprfm-runtime
+              export QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software
+              /opt/hyprfm.AppImage --appimage-extract-and-run --version
+              set +e
+              timeout 15 /opt/hyprfm.AppImage --appimage-extract-and-run > /tmp/smoke.stdout 2> /tmp/smoke.stderr
+              status=$?
+              set -e
+              cat /tmp/smoke.stdout /tmp/smoke.stderr
+              test "$status" -eq 124
+              ! grep -E "is not a type|failed to load component|QQmlApplicationEngine failed|TypeError:|Unable to assign|Aborted|Segmentation fault|Failed to initialize graphics backend|Failed to create RHI" /tmp/smoke.stderr
+              APPIMAGE_EXTRACT_AND_RUN=1 python3 /opt/tst_filepicker_startup.py /opt/hyprfm.AppImage
+            '
+
+      # The 22.04 test above proves the AppImage is not too new. This one proves
+      # it is not too old: the libraries left to the host (glib, dbus,
+      # xkbcommon, ...) are much newer here, and a stale bundled copy of one of
+      # their dependencies stops the app before main(). v0.7.0 passed on 22.04
+      # and failed on Fedora and Arch with "LIBSYSTEMD_251 not found" (#73).
+      - name: Smoke-test on current distros
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          smoke() {   # image, install command
+            docker run --rm \
+              --mount "type=bind,source=$GITHUB_WORKSPACE/HyprFM-${TAG_NAME}-x86_64.AppImage,target=/opt/hyprfm.AppImage,readonly" \
+              "$1" bash -euc "$2"'
+                mkdir -m700 /tmp/hyprfm-runtime
+                export XDG_RUNTIME_DIR=/tmp/hyprfm-runtime
+                export QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software
+                set +e
+                timeout 15 /opt/hyprfm.AppImage --appimage-extract-and-run > /tmp/smoke.out 2>&1
+                status=$?
+                set -e
+                cat /tmp/smoke.out
+                test "$status" -eq 124
+                ! grep -E "version .* not found|undefined symbol|cannot open shared object|is not a type|failed to load component|Aborted|Segmentation fault" /tmp/smoke.out
+              '
+          }
+          smoke fedora:latest 'dnf -y -q install glib2 dbus-libs fontconfig freetype libglvnd-glx libglvnd-egl libxkbcommon dejavu-sans-fonts'
+          smoke archlinux:latest 'pacman -Sy --noconfirm --needed glib2 dbus fontconfig libglvnd libxkbcommon ttf-dejavu'
+
+      # The runner's CPU has AVX-512, so nothing above notices code built for
+      # it. v0.7.0 died with SIGILL on every CPU without AVX-512 because Zig
+      # targeted the build machine. QEMU plays a 2008 CPU with no AVX at all.
+      - name: Smoke-test on an old CPU
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y --no-install-recommends qemu-user-static
+          rm -rf squashfs-root
+          "./HyprFM-${TAG_NAME}-x86_64.AppImage" --appimage-extract >/dev/null
+          smoke_dir=$(mktemp -d)
+          set +e
+          env -u LD_LIBRARY_PATH -u QT_PLUGIN_PATH -u QML_IMPORT_PATH -u QML2_IMPORT_PATH \
+            XDG_RUNTIME_DIR="$smoke_dir" XDG_CONFIG_HOME="$smoke_dir/config" \
+            XDG_CACHE_HOME="$smoke_dir/cache" \
+            QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
+            timeout 120 qemu-x86_64-static -cpu Nehalem squashfs-root/usr/bin/hyprfm \
+            > old-cpu.out 2>&1
+          status=$?
+          set -e
+          cat old-cpu.out
+          rm -rf squashfs-root "$smoke_dir"
+          # 124: still running after two emulated minutes. 132 is SIGILL.
+          test "$status" -eq 124
+
       - name: Upload AppImage artifact
         if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: hyprfm-appimage
-          path: HyprFM-${{ github.ref_name }}-x86_64.AppImage
+          path: |
+            HyprFM-${{ github.ref_name }}-x86_64.AppImage
+            HyprFM-${{ github.ref_name }}-x86_64.AppImage.zsync
           if-no-files-found: error
 
   # The flake can't fetch git submodules, so it pins Quill and quill-icons by
@@ -372,6 +509,17 @@ jobs:
 
       - name: Build flake
         run: nix build .#hyprfm --print-build-logs
+
+      # Users on stable NixOS consume the overlay against their own nixpkgs,
+      # which lags unstable (zig_0_17 was unstable-only and broke evaluation
+      # for them). Building there also catches a Qt API the stable Qt lacks.
+      # Pick up each new release by bumping this channel.
+      - name: Build overlay on stable nixpkgs
+        run: |
+          nix build --impure --print-build-logs --expr '
+            let f = builtins.getFlake "path:${{ github.workspace }}"; in
+            (import (builtins.fetchTarball "https://channels.nixos.org/nixos-26.05/nixexprs.tar.xz")
+              { overlays = [ f.overlays.default ]; }).hyprfm'
 
   # "Run workflow" also builds the Flatpak, from this commit instead of the
   # release tag the manifest pins, and uploads the bundle as an artifact:
@@ -575,6 +723,7 @@ jobs:
         with:
           files: |
             HyprFM-${{ github.ref_name }}-x86_64.AppImage
+            HyprFM-${{ github.ref_name }}-x86_64.AppImage.zsync
             HyprFM-${{ github.ref_name }}-x86_64.flatpak
           body_path: release-notes.md
 

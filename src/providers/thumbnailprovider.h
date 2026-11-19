@@ -7,6 +7,7 @@
 #include <QRunnable>
 #include <QImage>
 
+
 class ThumbnailResponse : public QQuickImageResponse, public QRunnable
 {
     Q_OBJECT
@@ -21,6 +22,11 @@ public:
     QString errorString() const override;
 
 private:
+    // Emits finished() on this object's own thread, never from run(). On a
+    // cache hit run() is done in microseconds, so a direct emit could land
+    // before the caller of requestImageResponse() has connected to it, and
+    // the image would never arrive.
+    void finish();
     void generateImageThumbnail();
     void generateSvgThumbnail();
     void generateVideoThumbnail();
@@ -28,6 +34,8 @@ private:
     QString m_id;
     QSize m_requestedSize;
     QImage m_image;
+    QString m_iconTheme;   // "theme=" in the id, for .directory Icon=<name>
+    bool m_folderWithoutIcon = false;   // plain folder: empty, but not an error
 };
 
 class ThumbnailProvider : public QQuickAsyncImageProvider

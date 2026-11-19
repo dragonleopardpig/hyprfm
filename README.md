@@ -127,7 +127,7 @@ HyprFM is a Qt6/QML file manager designed to feel native on Hyprland: lightweigh
 - **Git status overlays** in file lists (modified, staged, untracked, …)
 - **wl-clipboard** for the system clipboard on Wayland
 - **bat** for syntax-highlighted text previews
-- **md4c** for rendered Markdown previews (via `md2html`)
+- **md4c** for better Markdown previews (via `md2html`; without it Qt's own renderer is used, which handles raw HTML less well)
 - **ffmpeg** for video poster thumbnails
 - **Poppler** for PDF page previews
 
@@ -199,7 +199,9 @@ Or pull it into a system/home-manager flake:
 }
 ```
 
-then reference `hyprfm.packages.<system>.default` in `environment.systemPackages` / `home.packages`. The package version is parsed straight from `CMakeLists.txt`, so it always tracks the tree it's built from.
+then reference `hyprfm.packages.<system>.default` in `environment.systemPackages` / `home.packages`, or add `hyprfm.overlays.default` to `nixpkgs.overlays` and use `pkgs.hyprfm`, built against your own nixpkgs. The package version is parsed straight from `CMakeLists.txt`, so it always tracks the tree it's built from.
+
+Both work on stable NixOS as well as unstable. The built-in terminal needs Zig 0.17, which only nixos-unstable has; on a stable nixpkgs the flake takes Zig from its own pinned nixpkgs. If you also set `inputs.hyprfm.inputs.nixpkgs.follows` to a stable nixpkgs, Zig 0.17 isn't available anywhere, so HyprFM builds without the terminal and Nix prints a warning.
 
 The package bundles the tools HyprFM shells out to, including archive handling,
 previews, search and the gvfs client module, so nothing else has to be
@@ -239,7 +241,31 @@ To build a self-contained AppImage from the current checkout, useful for testing
 ./scripts/build-appimage-local.sh
 ```
 
-The result lands in the repo root as `HyprFM-<version>-x86_64.AppImage`. The script downloads `linuxdeploy` into `appimage-tools/` on first run, bundles Qt, and runs an offscreen smoke test before finishing. It needs `curl` or `wget` on top of the build dependencies below.
+The result lands in `build/packages/HyprFM-<version>-x86_64.AppImage`. The script downloads checksum-verified, pinned linuxdeploy tools into `build/appimage-tools/`, bundles Qt and its library dependencies, and requires the app to stay running during a ten-second offscreen startup check. It needs `curl` or `wget`, `sha256sum`, `timeout` and `rg` on top of the build dependencies below. `JOBS=2` is the default to keep memory use bounded.
+
+A local AppImage needs a glibc at least as new as its build host. Build on Ubuntu 22.04 using the existing **Build → Run workflow** CI job for the release-compatible AppImage; an Arch-built image is for testing on current distributions. Preview/archive/clipboard command-line tools still come from the host.
+
+#### Flatpak and Nix pre-release testing
+
+Run these from the checkout after `git submodule update --init --recursive`:
+
+```bash
+# KDE runtime and SDK (once); use either native flatpak-builder or org.flatpak.Builder.
+flatpak install --user flathub org.kde.Platform//6.9 org.kde.Sdk//6.9
+./scripts/build-flatpak-local.sh
+flatpak install --user ./build/packages/HyprFM-testing-x86_64.flatpak
+flatpak run --branch=testing io.github.soyeb_jim285.HyprFM
+
+# Build the local flake, not the published GitHub source.
+nix build .#hyprfm --out-link build/result-nix --max-jobs 1 --cores 2
+./build/result-nix/bin/hyprfm
+```
+
+The Flatpak script snapshots tracked working files and both submodules, including uncommitted edits, and exports an unsigned bundle on the `testing` branch. New source files must be added to Git's index before building. It leaves the release manifest's source tag intact. Build output and the local OSTree repository are under `build/`.
+
+On a non-NixOS host, if the Nix app stays running without showing a window, test with `QT_QUICK_BACKEND=software ./build/result-nix/bin/hyprfm`. Hardware rendering requires a graphics-driver setup compatible with the Nix Qt libraries.
+
+The Flatpak and Nix recipes build the built-in terminal (they bring their own Zig 0.17). The local AppImage includes it when Zig 0.17 is installed. Test file browsing, all three views, copy/move/trash/restore, archives, previews, clipboard and opening files in host apps in each format; network mounts need the session's GVFS services. The native file chooser portal needs host-side installation/configuration and is not registered by running an AppImage or installing a Flatpak.
 
 #### Dependencies
 

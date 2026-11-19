@@ -571,6 +571,15 @@ GridView {
     property string dragFileName: ""
     property bool isDragging: false
 
+    // True when (x, y) in view coordinates is on an item's tile rather than
+    // the gap around it.
+    function tileAt(x, y) {
+        var item = itemAt(x + contentX, y + contentY)
+        if (!item) return false
+        var p = mapToItem(item.tile, x, y)
+        return p.x >= 0 && p.y >= 0 && p.x < item.tile.width && p.y < item.tile.height
+    }
+
     // Start a drag from a delegate — uses C++ QDrag for system-wide DnD
     function beginDrag(filePath, iconName, fileName, mouseX, mouseY) {
         var paths = selectedIndices.length > 1
@@ -644,6 +653,9 @@ GridView {
         // The edited entry stacks above its neighbours, so its error label
         // is not drawn under the next row.
         z: root.inlineEdit.active && root.inlineEdit.path === filePath ? 2 : 0
+        // The hit/selection area: icon + label with a gap to the next cell, so
+        // the space between items is empty space (rubber band, background menu).
+        readonly property alias tile: selectionRect
 
         // The remove transition leaves opacity/scale animated down, and
         // reuseItems recycles that item as-is (view transitions never re-run
@@ -672,7 +684,7 @@ GridView {
         // Per-folder drop target
         DropArea {
             id: folderDropArea
-            anchors.fill: parent
+            anchors.fill: selectionRect
             keys: ["text/uri-list"]
             enabled: delegateItem.isDir && !delegateItem.isSelected
 
@@ -689,9 +701,12 @@ GridView {
             }
         }
 
-        readonly property bool hasThumbnail: !root.compactMode && !fileOps.isRemotePath(delegateItem.filePath) && !fileOps.isSlowPath(delegateItem.filePath)
-            && (delegateItem.hasImagePreview || delegateItem.hasVideoPreview
-                || delegateItem.hasPdfPreview)
+        // Compact rows show icons, not file thumbnails; a folder's custom icon
+        // is still its icon there, as in the Detailed view.
+        readonly property bool hasThumbnail: !fileOps.isRemotePath(delegateItem.filePath) && !fileOps.isSlowPath(delegateItem.filePath)
+            && (delegateItem.isDir
+                || (!root.compactMode && (delegateItem.hasImagePreview || delegateItem.hasVideoPreview
+                                          || delegateItem.hasPdfPreview)))
 
         Image {
             id: thumbImg
@@ -720,8 +735,9 @@ GridView {
                 : delegateItem.hasPdfPreview
                     ? ("image://pdfpreview/" + encodeURIComponent(delegateItem.filePath)
                        + "?page=0")
-                    : ("image://thumbnail/" + delegateItem.filePath
-                       + "?mtime=" + new Date(delegateItem.fileModified).getTime())
+                    : ("image://thumbnail/" + encodeURIComponent(delegateItem.filePath)
+                       + "?mtime=" + new Date(delegateItem.fileModified).getTime()
+                       + (delegateItem.isDir ? "&theme=" + config.iconTheme : ""))
             sourceSize: Qt.size(root.thumbnailRequestSize,
                                 root.thumbnailRequestSize)
             asynchronous: true
@@ -849,7 +865,7 @@ GridView {
             id: labelText
             objectName: root.compactMode ? "compactLabel_" + delegateItem.index : ""
             visible: !nameEditor.editing
-            width: root.compactMode ? parent.width - root.iconSize - 28 : parent.width - 12
+            width: root.compactMode ? parent.width - root.iconSize - 28 : selectionRect.width - 8
             anchors.horizontalCenter: root.compactMode ? undefined : parent.horizontalCenter
             anchors.left: root.compactMode ? iconImg.right : undefined
             anchors.leftMargin: root.compactMode ? 8 : 0
@@ -901,8 +917,12 @@ GridView {
         // Selection/hover rect wraps tightly around the content
         Rectangle {
             id: selectionRect
-            anchors.fill: parent
-            anchors.margins: 0
+            // A compact row is the whole cell, as the Detailed view's rows are.
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.top: parent.top
+            anchors.topMargin: root.compactMode ? 0 : 3
+            width: root.compactMode ? parent.width : Math.min(parent.width - 10, Math.max(root.iconSize + 36, 110))
+            height: root.compactMode ? parent.height : parent.height - 6
             radius: Theme.radiusMedium
             z: -1
             opacity: (root.isDragging && delegateItem.isSelected) ? 0.4 : 1.0
@@ -1071,8 +1091,7 @@ GridView {
         }
 
         onPressed: (mouse) => {
-            var idx = root.indexAt(mouse.x + root.contentX, mouse.y + root.contentY)
-            if (idx >= 0) {
+            if (root.tileAt(mouse.x, mouse.y)) {
                 mouse.accepted = false
                 return
             }
@@ -1133,8 +1152,8 @@ GridView {
             for (var i = 0; i < c; i++) {
                 var item = root.itemAtIndex(i)
                 if (!item) continue
-                var itemPos = root.mapFromItem(item, 0, 0)
-                var itemRect = Qt.rect(itemPos.x, itemPos.y, item.width, item.height)
+                var itemPos = root.mapFromItem(item.tile, 0, 0)
+                var itemRect = Qt.rect(itemPos.x, itemPos.y, item.tile.width, item.tile.height)
                 if (rectsIntersect(rb, itemRect))
                     newSel.push(i)
             }

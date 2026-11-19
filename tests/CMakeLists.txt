@@ -2,12 +2,13 @@
 
 add_executable(tst_configmanager tst_configmanager.cpp
     ${CMAKE_SOURCE_DIR}/src/services/configmanager.cpp
+    ${CMAKE_SOURCE_DIR}/src/services/desktopcolorscheme.cpp
 )
 target_include_directories(tst_configmanager PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/src/third_party
 )
-target_link_libraries(tst_configmanager PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
+target_link_libraries(tst_configmanager PRIVATE Qt6::Test Qt6::Core Qt6::Gui Qt6::DBus)
 add_test(NAME tst_configmanager COMMAND tst_configmanager)
 
 add_executable(tst_themeloader tst_themeloader.cpp
@@ -77,6 +78,10 @@ add_executable(tst_previewservice tst_previewservice.cpp
 target_include_directories(tst_previewservice PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(tst_previewservice PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
 add_test(NAME tst_previewservice COMMAND tst_previewservice)
+# Without md2html on PATH, Markdown goes through Qt's own renderer.
+add_test(NAME tst_previewservice_no_md2html COMMAND tst_previewservice
+    testMarkdownPreviewDropsRemoteImages testMarkdownPreviewHonoursTheLineCap)
+set_tests_properties(tst_previewservice_no_md2html PROPERTIES ENVIRONMENT "PATH=/nonexistent")
 
 add_executable(tst_rcloneservice tst_rcloneservice.cpp
     ${CMAKE_SOURCE_DIR}/src/services/rcloneservice.cpp
@@ -254,6 +259,10 @@ target_compile_definitions(tst_mainwindow PRIVATE
 )
 target_link_libraries(tst_mainwindow PRIVATE hyprfm_icons Qt6::Svg Qt6::Test Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::DBus Qt6::Svg Qt6::Network Qt6::Concurrent PkgConfig::GIO)
 add_dependencies(tst_mainwindow hyprfm)
+qt_add_resources(tst_mainwindow "logo"
+    PREFIX "/HyprFM"
+    BASE "${CMAKE_SOURCE_DIR}/dist"
+    FILES "${CMAKE_SOURCE_DIR}/dist/io.github.soyeb_jim285.HyprFM.svg")
 add_test(NAME tst_mainwindow COMMAND tst_mainwindow)
 
 # The view harnesses assert pixel geometry of a 900x600 window; a tiling
@@ -283,7 +292,7 @@ add_executable(tst_thumbnailprovider tst_thumbnailprovider.cpp
     ${CMAKE_SOURCE_DIR}/src/providers/thumbnailprovider.cpp
 )
 target_include_directories(tst_thumbnailprovider PRIVATE ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(tst_thumbnailprovider PRIVATE Qt6::Test Qt6::Core Qt6::Gui Qt6::Quick Qt6::Svg)
+target_link_libraries(tst_thumbnailprovider PRIVATE Qt6::Test Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Svg PkgConfig::GIO)
 add_test(NAME tst_thumbnailprovider COMMAND tst_thumbnailprovider)
 
 add_executable(tst_pdfpreviewprovider tst_pdfpreviewprovider.cpp
@@ -396,6 +405,9 @@ if(NOT Python3_Interpreter_FOUND)
     return()
 endif()
 set(HYPRFM_PORTAL_TEST_PYTHON ${Python3_EXECUTABLE})
+add_test(NAME tst_filepicker_startup
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tst_filepicker_startup.py $<TARGET_FILE:hyprfm>)
+set_tests_properties(tst_filepicker_startup PROPERTIES TIMEOUT 15)
 execute_process(COMMAND ${HYPRFM_PORTAL_TEST_PYTHON} -c "from gi.repository import Gio, GLib"
     RESULT_VARIABLE HYPRFM_HAVE_PYGOBJECT OUTPUT_QUIET ERROR_QUIET)
 if(NOT HYPRFM_HAVE_PYGOBJECT EQUAL 0 AND EXISTS "/usr/bin/python3")

@@ -928,7 +928,7 @@ FocusScope {
                             anchors.verticalCenter: parent.verticalCenter
 
                             readonly property bool hasThumbnail: !fileOps.isRemotePath(currentDelegate.filePath) && !fileOps.isSlowPath(currentDelegate.filePath)
-                                && (currentDelegate.hasImagePreview || currentDelegate.hasVideoPreview)
+                                && (currentDelegate.isDir || currentDelegate.hasImagePreview || currentDelegate.hasVideoPreview)
 
                             Image {
                                 anchors.fill: parent
@@ -948,8 +948,9 @@ FocusScope {
                                          && implicitWidth > 0
                                 fillMode: Image.PreserveAspectFit
                                 source: parent.hasThumbnail
-                                    ? ("image://thumbnail/" + currentDelegate.filePath
-                                       + "?mtime=" + new Date(currentDelegate.fileModified).getTime())
+                                    ? ("image://thumbnail/" + encodeURIComponent(currentDelegate.filePath)
+                                       + "?mtime=" + new Date(currentDelegate.fileModified).getTime()
+                                       + (currentDelegate.isDir ? "&theme=" + config.iconTheme : ""))
                                     : ""
                                 sourceSize: Qt.size(64 * Screen.devicePixelRatio, 64 * Screen.devicePixelRatio)
                                 asynchronous: true
@@ -1357,7 +1358,7 @@ FocusScope {
             readonly property bool hasVisualPreview: isImage || (isVideo && videoPreviewAvailable)
             readonly property string visualSource: {
                 if (!hasVisualPreview || previewFilePath === "") return ""
-                if (isVideo || isTrashUri || isSvg) return "image://thumbnail/" + previewFilePath
+                if (isVideo || isTrashUri || isSvg) return "image://thumbnail/" + encodeURIComponent(previewFilePath)
                 return "file://" + previewFilePath
             }
             readonly property string pdfImageSource: {
@@ -1404,8 +1405,8 @@ FocusScope {
                 return textExt.indexOf(ext) >= 0
             }
 
-            // The service decides what it rendered: md2html missing or failing
-            // falls back to bat, and highlighted source must keep the monospace
+            // The service decides what it rendered: md2html failing falls
+            // back to bat, and highlighted source must keep the monospace
             // no-wrap treatment rather than be laid out as a document on the
             // strength of an extension alone.
             readonly property bool isMarkdown: previewColumn.textPreview.markdown === true
@@ -1867,8 +1868,21 @@ FocusScope {
                         interactive: true
                         boundsMovement: Flickable.StopAtBounds
                         boundsBehavior: Flickable.StopAtBounds
-                        contentWidth: previewColumn.isMarkdown ? width : Math.max(width, textArea.implicitWidth)
+                        contentWidth: previewColumn.isMarkdown ? markdownWidth : Math.max(width, textArea.implicitWidth)
                         contentHeight: Math.max(height, textArea.implicitHeight)
+
+                        // The width Markdown is laid out at, caught up once the
+                        // panel stops resizing. Opening a split animates this
+                        // column every frame, and each new width rebuilt the
+                        // HTML (image limits) and re-laid out the whole
+                        // document: long READMEs made the animation crawl.
+                        property real markdownWidth: width
+                        onWidthChanged: markdownSettle.restart()
+                        Timer {
+                            id: markdownSettle
+                            interval: 150
+                            onTriggered: textPreviewFlick.markdownWidth = textPreviewFlick.width
+                        }
 
                         TextEdit {
                             id: textArea
@@ -1884,7 +1898,7 @@ FocusScope {
                             }
                             readOnly: true
                             selectByMouse: true
-                            width: previewColumn.isMarkdown ? textPreviewFlick.width : Math.max(implicitWidth, textPreviewFlick.width)
+                            width: previewColumn.isMarkdown ? textPreviewFlick.markdownWidth : Math.max(implicitWidth, textPreviewFlick.width)
                             baseUrl: previewColumn.markdownBaseUrl
                             height: Math.max(implicitHeight, textPreviewFlick.height)
                             textFormat: previewColumn.textPreview.usesBat && previewColumn.textPreview.html !== ""
@@ -1898,7 +1912,7 @@ FocusScope {
                                         ? (previewColumn.isMarkdown
                                             ? previewColumn.fitMarkdownImages(
                                                   previewColumn.textPreview.html,
-                                                  textPreviewFlick.width - 24)
+                                                  textPreviewFlick.markdownWidth - 24)
                                             : previewColumn.textPreview.html)
                                         : previewColumn.textPreview.content))
                             color: Theme.text

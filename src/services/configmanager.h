@@ -46,6 +46,7 @@ class ConfigManager : public QObject
     Q_PROPERTY(QString sidebarPosition READ sidebarPosition NOTIFY configChanged)
     Q_PROPERTY(int sidebarWidth READ sidebarWidth NOTIFY configChanged)
     Q_PROPERTY(bool sidebarVisible READ sidebarVisible NOTIFY configChanged)
+    Q_PROPERTY(QString sidebarHeader READ sidebarHeader NOTIFY configChanged)
     Q_PROPERTY(int sidebarAutoHideWidth READ sidebarAutoHideWidth NOTIFY configChanged)
     Q_PROPERTY(QStringList hiddenQuickAccess READ hiddenQuickAccess NOTIFY configChanged)
     Q_PROPERTY(QStringList bookmarks READ bookmarks NOTIFY configChanged)
@@ -81,7 +82,7 @@ class ConfigManager : public QObject
 public:
     explicit ConfigManager(const QString &configPath, QObject *parent = nullptr,
                            const QStringList &themesDirs = QStringList(),
-                           const QString &defaultTheme = QStringLiteral("catppuccin-mocha"));
+                           bool desktopDark = true);
 
     QStringList availableMonospaceFonts() const;
     QStringList availableFonts() const;
@@ -124,6 +125,7 @@ public:
     QString sidebarPosition() const;
     int sidebarWidth() const;
     bool sidebarVisible() const;
+    QString sidebarHeader() const;
     // Window width below which the sidebar folds away on its own; 0 disables it.
     int sidebarAutoHideWidth() const;
     QStringList hiddenQuickAccess() const;
@@ -212,7 +214,8 @@ private:
 
     QString m_configPath;
     QStringList m_themesDirs;
-    QString m_defaultThemeName;
+    // Picks dark_theme over light_theme while the file sets no "theme".
+    bool m_desktopDark = true;
     QFileSystemWatcher m_watcher;
     QFileSystemWatcher m_iconWatcher;
     QTimer m_iconRefreshTimer;
@@ -251,6 +254,7 @@ private:
     QString m_sidebarPosition;
     int m_sidebarWidth;
     bool m_sidebarVisible;
+    QString m_sidebarHeader;  // "name" | "logo" | "button" | "none"
     int m_sidebarAutoHideWidth;
     QStringList m_hiddenQuickAccess;
     QStringList m_listColumns;

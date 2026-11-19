@@ -62,7 +62,9 @@ QtObject {
     function reload() {
         _debounce.stop()
         clear()
-
+        // Not `path === ""` here: path is still the previous file's at this
+        // point (see above), so going from no selection straight to a file --
+        // entering a folder auto-selects its first item -- skipped the load.
         // Dispatch even when there is no body to load: metadata alone costs
         // ~120 ms of exiftool/ffprobe and must not run on the GUI thread.
         loading = true
@@ -75,9 +77,6 @@ QtObject {
     property Timer _debounce: Timer {
         interval: 80
         onTriggered: {
-            // path is a dependent binding too: on the first Miller selection
-            // it can still be empty inside reload(). Inspect it here, alongside
-            // kind, once all bindings describe the new selection.
             if (loader.path === "") {
                 previewService.cancelPreview(loader.requester)
                 loader.loading = false

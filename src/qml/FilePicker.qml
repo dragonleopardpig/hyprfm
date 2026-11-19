@@ -140,7 +140,7 @@ Window {
                         currentViewMode: root.viewMode
                         showWindowControls: true
                         windowButtonLayout: ":close"
-                        onSidebarToggleRequested: root.sidebarVisible = true
+                        onSidebarToggleRequested: root.sidebarVisible = !root.sidebarVisible
                         onNavigateRequested: path => root.navigate(path)
                         onBackRequested: root.goBack()
                         onForwardRequested: root.goForward()

@@ -51,6 +51,12 @@ int clampedAutoHideWidth(int value)
 {
     return value <= 0 ? 0 : qBound(320, value, 2000);
 }
+
+bool validSidebarHeader(const QString &header)
+{
+    return header == QLatin1String("name") || header == QLatin1String("logo")
+           || header == QLatin1String("button") || header == QLatin1String("none");
+}
 }
 
 
@@ -147,13 +153,14 @@ QStringList iconSearchDirs()
 // Default bookmarks follow the XDG user dirs, so they keep working on systems
 // where the folders are localised (Documentos, Imagens, ...). Entries that
 // don't resolve to a real directory are dropped instead of shipping a
-// bookmark that opens an empty view.
+// bookmark that opens an empty view. Pictures and Downloads are left out:
+// the sidebar's quick-access section already lists them.
 QStringList defaultBookmarkPaths()
 {
     QStringList paths = {
         QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation),
-        QStandardPaths::writableLocation(QStandardPaths::DownloadLocation),
-        QStandardPaths::writableLocation(QStandardPaths::PicturesLocation),
+        QStandardPaths::writableLocation(QStandardPaths::MusicLocation),
+        QStandardPaths::writableLocation(QStandardPaths::MoviesLocation),
         QDir::homePath() + QStringLiteral("/Projects"),
     };
 
@@ -230,11 +237,11 @@ QMap<QString, QString> ConfigManager::s_defaultShortcuts = {
 };
 
 ConfigManager::ConfigManager(const QString &configPath, QObject *parent, const QStringList &themesDirs,
-                             const QString &defaultTheme)
+                             bool desktopDark)
     : QObject(parent)
     , m_configPath(configPath)
     , m_themesDirs(themesDirs)
-    , m_defaultThemeName(defaultTheme)
+    , m_desktopDark(desktopDark)
 {
     setDefaults();
     seedDocumentedConfig();
@@ -346,11 +353,9 @@ QStringList ConfigManager::availableIconThemes() const
 
 void ConfigManager::setDefaults()
 {
-    m_theme = m_defaultThemeName.trimmed().isEmpty()
-        ? QStringLiteral("catppuccin-mocha")
-        : m_defaultThemeName.trimmed();
     m_lightTheme = QStringLiteral("catppuccin-latte");
     m_darkTheme = QStringLiteral("catppuccin-mocha");
+    m_theme = m_desktopDark ? m_darkTheme : m_lightTheme;
     // The bundled pack is the default; an explicitly empty setting still
     // follows the desktop through setIconThemeFallback().
     m_iconTheme = QStringLiteral("Strata");
@@ -381,6 +386,7 @@ void ConfigManager::setDefaults()
     m_sidebarWidth = 200;
     m_dependencyStartupCheck = true;
     m_sidebarVisible = true;
+    m_sidebarHeader = QStringLiteral("name");
     m_sidebarAutoHideWidth = 700;
     m_hiddenQuickAccess.clear();
     setListColumnsNormalized({}, {});
@@ -456,12 +462,14 @@ void ConfigManager::loadConfig()
         m_showWindowControls = m_showWindowControlsRuntimeDefault;
 
 
-        if (auto v = config["general"]["theme"].value<std::string>())
-            m_theme = QString::fromStdString(*v);
         if (auto v = config["general"]["light_theme"].value<std::string>())
             m_lightTheme = QString::fromStdString(*v);
         if (auto v = config["general"]["dark_theme"].value<std::string>())
             m_darkTheme = QString::fromStdString(*v);
+        // No "theme": the half of the pair that matches the desktop.
+        m_theme = m_desktopDark ? m_darkTheme : m_lightTheme;
+        if (auto v = config["general"]["theme"].value<std::string>())
+            m_theme = QString::fromStdString(*v);
         if (auto v = config["general"]["auto_refresh_icons"].value<bool>())
             m_autoRefreshIcons = *v;
         if (auto v = config["general"]["file_icon_colors"].value<std::string>())
@@ -528,6 +536,14 @@ void ConfigManager::loadConfig()
             m_sidebarWidth = static_cast<int>(*v);
         if (auto v = config["sidebar"]["visible"].value<bool>())
             m_sidebarVisible = *v;
+        // show_title = false shipped briefly on main before header did.
+        if (auto v = config["sidebar"]["show_title"].value<bool>(); v && !*v)
+            m_sidebarHeader = QStringLiteral("none");
+        if (auto v = config["sidebar"]["header"].value<std::string>()) {
+            const QString header = QString::fromStdString(*v);
+            if (validSidebarHeader(header))
+                m_sidebarHeader = header;
+        }
         if (auto v = config["sidebar"]["auto_hide_width"].value<int64_t>())
             m_sidebarAutoHideWidth = clampedAutoHideWidth(static_cast<int>(*v));
 
@@ -843,6 +859,9 @@ scrollback_lines = 10000
 position = "left"
 width = 200
 visible = true
+# Top of the sidebar: "name" | "logo" | "button" (collapse button only) |
+# "none" (no header; the collapse button moves to the toolbar)
+header = "name"
 # Fold the sidebar away when the window is narrower than this many pixels.
 # It stays toggleable by hand, and comes back when the window grows again.
 # 0 turns it off; anything else is clamped to 320-2000.
@@ -897,7 +916,7 @@ current_fraction = 0.5
 
 [bookmarks]
 # Sidebar bookmarks. Unset = the XDG user folders that exist on this machine.
-# paths = ["~/Documents", "~/Downloads", "~/Pictures", "~/Projects"]
+# paths = ["~/Documents", "~/Music", "~/Videos", "~/Projects"]
 # Custom display names, keyed by an entry of paths. Right-click a bookmark
 # and choose "Rename" to set one in-app.
 # names = { "~/Projects" = "Work" }
@@ -1115,6 +1134,7 @@ bool ConfigManager::rememberSortPerFolder() const { return m_rememberSortPerFold
 QString ConfigManager::sidebarPosition() const { return m_sidebarPosition; }
 int ConfigManager::sidebarWidth() const { return m_sidebarWidth; }
 bool ConfigManager::sidebarVisible() const { return m_sidebarVisible; }
+QString ConfigManager::sidebarHeader() const { return m_sidebarHeader; }
 int ConfigManager::sidebarAutoHideWidth() const { return m_sidebarAutoHideWidth; }
 QStringList ConfigManager::hiddenQuickAccess() const { return m_hiddenQuickAccess; }
 QStringList ConfigManager::bookmarks() const { return m_bookmarks; }
@@ -1433,6 +1453,15 @@ void ConfigManager::saveSettings(const QVariantMap &settings)
     if (settings.contains("sidebarVisible")) {
         m_sidebarVisible = settings.value("sidebarVisible").toBool();
         sidebar.insert_or_assign("visible", m_sidebarVisible);
+    }
+
+    if (settings.contains("sidebarHeader")) {
+        const QString header = settings.value("sidebarHeader").toString();
+        if (validSidebarHeader(header)) {
+            m_sidebarHeader = header;
+            sidebar.insert_or_assign("header", header.toStdString());
+            sidebar.erase("show_title");
+        }
     }
 
     if (settings.contains("sidebarAutoHideWidth")) {

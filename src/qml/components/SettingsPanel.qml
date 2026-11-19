@@ -97,6 +97,7 @@ Window {
     property int draftTerminalScrollbackLines: config.terminalScrollbackLines
     property bool draftDependencyStartupCheck: config.dependencyStartupCheck
     property bool draftSidebarVisible: currentSidebarVisible
+    property string draftSidebarHeader: config.sidebarHeader
     // Must stay in sync with the quick-access entries in Sidebar.qml.
     readonly property var quickAccessNames: ["Home", "Computer", "Recents", "Trash", "Network", "Pictures", "Downloads"]
     property var draftHiddenQuickAccess: config.hiddenQuickAccess
@@ -304,6 +305,7 @@ Window {
         draftTerminalCursorBlink = true
         draftDependencyStartupCheck = true
         draftSidebarVisible = true
+        draftSidebarHeader = "name"
         draftHiddenQuickAccess = []
         draftSidebarPosition = defaultSidebarPosition
         draftSplitOrientation = "vertical"
@@ -363,6 +365,7 @@ Window {
             draftTerminalScrollbackLines = config.terminalScrollbackLines
             draftDependencyStartupCheck = config.dependencyStartupCheck
             draftSidebarVisible = currentSidebarVisible
+            draftSidebarHeader = config.sidebarHeader
             draftHiddenQuickAccess = config.hiddenQuickAccess
             draftSidebarPosition = config.sidebarPosition
             draftSplitOrientation = config.splitOrientation
@@ -449,6 +452,7 @@ Window {
             terminalScrollbackLines: draftTerminalScrollbackLines,
             dependencyStartupCheck: draftDependencyStartupCheck,
             sidebarVisible: draftSidebarVisible,
+            sidebarHeader: draftSidebarHeader,
             hiddenQuickAccess: draftHiddenQuickAccess,
             sidebarPosition: draftSidebarPosition,
             splitOrientation: draftSplitOrientation,
@@ -604,6 +608,9 @@ Window {
                 currentIndex: root.optionIndex(root.lightThemeOptions, root.draftLightTheme, 0)
                 onSelected: (_, value) => {
                     root.draftLightTheme = value
+                    // The half of the pair in use shows straight away.
+                    if (!root.draftDarkMode)
+                        root.setDraftTheme(value)
                     root.applySettingsNow()
                 }
             }
@@ -615,6 +622,8 @@ Window {
                 currentIndex: root.optionIndex(root.darkThemeOptions, root.draftDarkTheme, 0)
                 onSelected: (_, value) => {
                     root.draftDarkTheme = value
+                    if (root.draftDarkMode)
+                        root.setDraftTheme(value)
                     root.applySettingsNow()
                 }
             }
@@ -921,6 +930,19 @@ Window {
                 checked: root.draftSidebarVisible
                 onToggled: (value) => {
                     root.draftSidebarVisible = value
+                    root.applySettingsNow()
+                }
+            }
+
+            Q.Dropdown {
+                Layout.fillWidth: true
+                readonly property var values: ["name", "logo", "button", "none"]
+                label: "Sidebar header"
+                enabled: root.draftSidebarVisible
+                model: ["App name", "Logo", "Collapse button only", "None (button in toolbar)"]
+                currentIndex: Math.max(0, values.indexOf(root.draftSidebarHeader))
+                onSelected: (index, _) => {
+                    root.draftSidebarHeader = values[index]
                     root.applySettingsNow()
                 }
             }

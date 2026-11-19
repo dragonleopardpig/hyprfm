@@ -375,7 +375,7 @@ ApplicationWindow {
     }
 
     function paneIsComputer(pane) {
-        return !paneIsRecents(pane) && !paneSearchMode(pane) && isComputerPath(panePath(pane))
+        return !paneIsRecents(pane) && !paneShowsSearchResults(pane) && isComputerPath(panePath(pane))
     }
 
     function pathDisplayName(path) {
@@ -565,6 +565,11 @@ ApplicationWindow {
             primaryPaneSearchMode = enabled
     }
 
+    // Search mode with an empty query shows the folder, not the empty results (#72).
+    function paneShowsSearchResults(pane) {
+        return paneSearchMode(pane) && searchProxyForPane(pane).searchQuery !== ""
+    }
+
     function paneFilterPanelOpen(pane) {
         return pane === "secondary" ? secondaryPaneFilterPanelOpen : primaryPaneFilterPanelOpen
     }
@@ -594,7 +599,7 @@ ApplicationWindow {
         if (root.paneIsRecents(pane))
             return recentFiles
 
-        if (root.paneSearchMode(pane))
+        if (root.paneShowsSearchResults(pane))
             return searchProxyForPane(pane)
 
         return paneBaseModel(pane)
@@ -1131,7 +1136,7 @@ ApplicationWindow {
         if (root.paneIsComputer(activePane)) return computerModel.count
         if (root.paneIsRecents(activePane))
             return recentFiles.count
-        if (root.paneSearchMode(activePane))
+        if (root.paneShowsSearchResults(activePane))
             return searchProxyForPane(activePane).count
 
         var model = paneBaseModel(activePane)
@@ -1139,7 +1144,7 @@ ApplicationWindow {
     }
 
     function activeFolderCount() {
-        if (root.paneIsComputer(activePane) || root.paneIsRecents(activePane) || root.paneSearchMode(activePane))
+        if (root.paneIsComputer(activePane) || root.paneIsRecents(activePane) || root.paneShowsSearchResults(activePane))
             return 0
 
         return paneBaseModel(activePane).folderCount
@@ -1327,7 +1332,7 @@ ApplicationWindow {
         if (items.length === 1 && items[0].isDir)
             return items[0].path
 
-        if (!root.paneIsRecents(root.activePane) && !root.paneSearchMode(root.activePane))
+        if (!root.paneIsRecents(root.activePane) && !root.paneShowsSearchResults(root.activePane))
             return root.panePath(root.activePane)
 
         return ""
@@ -1342,7 +1347,7 @@ ApplicationWindow {
         if (items.length === 1)
             return items[0].path
 
-        if (!root.paneIsRecents(root.activePane) && !root.paneSearchMode(root.activePane))
+        if (!root.paneIsRecents(root.activePane) && !root.paneShowsSearchResults(root.activePane))
             return root.panePath(root.activePane)
 
         return ""
@@ -1357,7 +1362,7 @@ ApplicationWindow {
         if (items.length === 1)
             return items[0].isDir ? items[0].path : fileOps.parentPath(items[0].path)
 
-        if (!root.paneIsRecents(root.activePane) && !root.paneSearchMode(root.activePane))
+        if (!root.paneIsRecents(root.activePane) && !root.paneShowsSearchResults(root.activePane))
             return root.panePath(root.activePane)
 
         return ""
@@ -1472,7 +1477,7 @@ ApplicationWindow {
     function createAndNameInline(parentPath, isFolder) {
         const view = root.inlineEditView()
         if (!view || parentPath !== root.panePath(root.activePane)
-                || root.paneIsRecents(root.activePane) || root.paneSearchMode(root.activePane))
+                || root.paneIsRecents(root.activePane) || root.paneShowsSearchResults(root.activePane))
             return false
         const name = root.uniqueChildName(parentPath, isFolder ? "New Folder" : "New File")
         const created = parentPath + "/" + name
@@ -1614,7 +1619,7 @@ ApplicationWindow {
             return
         }
 
-        if (!root.paneIsRecents(root.activePane) && !root.paneSearchMode(root.activePane)) {
+        if (!root.paneIsRecents(root.activePane) && !root.paneShowsSearchResults(root.activePane)) {
             var firstPath = paths[0]
             if (root.parentDirForPath(firstPath) === panePath(root.activePane)) {
                 Qt.callLater(function() {
@@ -3588,6 +3593,8 @@ ApplicationWindow {
 
                 property var sidebarItem: ({})
 
+                onEmptyTrashRequested: root.openDialog(emptyTrashConfirmDialogLoader)
+
                 onOpenRequested: (path) => {
                     if (sidebarItem.isRecents) {
                         root.openRecents()
@@ -3624,8 +3631,6 @@ ApplicationWindow {
                 onCustomActionRequested: (action) => {
                     if (action === "open_saved_split") {
                         root.restoreSavedSplit(bookmarks.splitAt(sidebarItem.index))
-                    } else if (action === "emptytrash") {
-                        root.openDialog(emptyTrashConfirmDialogLoader)
                     } else if (action === "renamebookmark") {
                         if ((sidebarItem.kind === "bookmark" || sidebarItem.kind === "savedSplit") && sidebarItem.index >= 0)
                             sidebarPanel.startBookmarkRename(sidebarItem.index)
@@ -4645,7 +4650,12 @@ ApplicationWindow {
                     // drops into the bottom-right quarter, then both panes
                     // stretch to the full width. Going back runs it in reverse.
                     property real orientationProgress: root.isSplitHorizontal ? 1 : 0
+                    // Only fold a split that is on screen. Opening a split in the
+                    // other orientation sets the orientation first, and animating
+                    // that played the side-by-side-to-stacked fold while the new
+                    // pane was still growing in.
                     Behavior on orientationProgress {
+                        enabled: root.splitViewPresented
                         NumberAnimation {
                             duration: Theme.animDurationSlow
                             easing.type: Theme.animEasingTransition; easing.bezierCurve: Theme.animBezierCurve
@@ -4688,6 +4698,8 @@ ApplicationWindow {
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
                                 fileModel: root.paneModel("primary")
+                                loadError: root.paneIsRecents("primary") || root.paneShowsSearchResults("primary")
+                                    ? "" : root.paneBaseModel("primary").loadError
                                 viewMode: tabModel.activeTab ? tabModel.activeTab.viewMode : "grid"
                                 currentPath: root.panePath("primary")
                                 showComputer: root.paneIsComputer("primary")
@@ -4788,6 +4800,8 @@ ApplicationWindow {
                                     Layout.fillWidth: true
                                     Layout.fillHeight: true
                                     fileModel: root.paneModel("secondary")
+                                    loadError: root.paneIsRecents("secondary") || root.paneShowsSearchResults("secondary")
+                                        ? "" : root.paneBaseModel("secondary").loadError
                                     viewMode: tabModel.activeTab ? tabModel.activeTab.viewMode : "grid"
                                     currentPath: root.panePath("secondary")
                                     showComputer: root.paneIsComputer("secondary")
@@ -4874,7 +4888,7 @@ ApplicationWindow {
                     folderCount: root.activeFolderCount()
                     searchStatus: root.searchMode && root.searchServiceForPane(activePane).isSearching
                         ? "Searching... " + root.searchServiceForPane(activePane).resultCount + " results"
-                        : (root.searchMode && root.searchProxyForPane(activePane).searchActive
+                        : (root.paneShowsSearchResults(activePane)
                             ? root.searchProxyForPane(activePane).count + " results"
                             : "")
                     selectedCount: root.currentSelectedCount

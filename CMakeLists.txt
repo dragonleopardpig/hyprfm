@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(hyprfm VERSION 0.6.1 LANGUAGES CXX)
+project(hyprfm VERSION 0.7.1 LANGUAGES CXX)
 
 include(GNUInstallDirs)
 
@@ -32,6 +32,22 @@ if(HYPRFM_TERMINAL)
     # core is too slow to type into, whatever HyprFM itself is built as.
     if(NOT CMAKE_BUILD_TYPE MATCHES "^(Release|RelWithDebInfo|MinSizeRel)$")
         set(GHOSTTY_ZIG_BUILD_FLAGS "-Doptimize=ReleaseFast" CACHE STRING "" FORCE)
+    endif()
+    # Without an explicit version Ghostty asks git, and git finds HyprFM's
+    # checkout around build/_deps: on a release tag (v0.7.0) Ghostty panics
+    # "tagged releases must be in vX.Y.Z format matching build.zig". The
+    # value is cosmetic; it only has to be a semantic version.
+    set(_ghostty_flags "${GHOSTTY_ZIG_BUILD_FLAGS}")
+    if(NOT _ghostty_flags MATCHES "-Dversion-string=")
+        list(APPEND _ghostty_flags "-Dversion-string=1.3.2-dev")
+        set(GHOSTTY_ZIG_BUILD_FLAGS "${_ghostty_flags}" CACHE STRING "" FORCE)
+    endif()
+    # Zig targets the build machine's CPU by default. The CI runner has
+    # AVX-512, so the AppImage died with SIGILL (in Zig's memset) on CPUs
+    # without it. Nix and Flatpak already pass this; make it the default.
+    if(NOT _ghostty_flags MATCHES "-Dcpu=")
+        list(APPEND _ghostty_flags "-Dcpu=baseline")
+        set(GHOSTTY_ZIG_BUILD_FLAGS "${_ghostty_flags}" CACHE STRING "" FORCE)
     endif()
     FetchContent_Declare(ghostty
         URL https://github.com/ghostty-org/ghostty/archive/da5936c2287cd7f466acdad3cc000de5ce35ccaa.tar.gz
