@@ -61,6 +61,9 @@
 #include "services/sessionstate.h"
 #include "services/themeloader.h"
 #include "services/undomanager.h"
+#ifdef HYPRFM_TERMINAL
+#include "terminal/terminalview.h"
+#endif
 
 // Root (prepended by ComputerModel), a mounted data drive and two
 // unmounted drives that have neither a device path nor a mount point.
@@ -108,6 +111,9 @@ class TestMainWindow : public QObject
         QQuickWindow *window = nullptr;
 
         FilePicker *picker = nullptr;
+        // Off by default, as for builds without the terminal; a test that
+        // drives the built-in terminal sets it before load().
+        bool builtinTerminal = false;
         bool load(const QJsonObject &pickerRequest = {})
         {
             QDir().mkpath(moduleDir.path() + "/HyprFM");
@@ -210,6 +216,13 @@ class TestMainWindow : public QObject
                 fsModel->setRootPath(picker->initialFolder());
                 ctx->setContextProperty("picker", picker);
             }
+#ifdef HYPRFM_TERMINAL
+            qmlRegisterType<TerminalView>("HyprFM", 1, 0, "TerminalView");   // as main.cpp does
+            if (builtinTerminal) {
+                ctx->setContextProperty("hyprfmBuiltinTerminal", true);
+                ctx->setContextProperty("terminalDefaultFontSize", TerminalView::defaultFontPointSize());
+            }
+#endif
             engine.load(QUrl::fromLocalFile(picker ? QStringLiteral(TEST_SOURCE_DIR "/src/qml/FilePicker.qml")
                                                  : QStringLiteral(TEST_SOURCE_DIR "/src/qml/Main.qml")));
             if (engine.rootObjects().isEmpty())
@@ -631,6 +644,112 @@ private slots:
         grid->setProperty("columnCount", 5);
         QTest::keyClick(app.window, Qt::Key_0, Qt::ControlModifier | Qt::AltModifier);
         QTRY_COMPARE(grid->property("columnCount").toInt(), 7);
+    }
+
+    // Split panes in two folders: F4 in each pane opens that pane's own
+    // terminal, under that pane, its shell in that pane's folder (the panel
+    // used to be one, across the window, in the active pane's folder only).
+    // F4 closes just the active pane's; clicking into a terminal makes its
+    // pane the active one and keeps the keyboard there.
+    void testEachSplitPaneOpensItsOwnTerminal()
+    {
+#ifndef HYPRFM_TERMINAL
+        QSKIP("built without the built-in terminal");
+#else
+        qputenv("SHELL", "/bin/sh");
+        qputenv("ENV", "");   // no ~/.shrc for an interactive sh
+        App app;
+        app.builtinTerminal = true;
+        QVERIFY(app.load());
+        const QString left = app.home.path() + "/left";
+        const QString right = app.home.path() + "/right";
+        QVERIFY(QDir().mkpath(left) && QDir().mkpath(right));
+        auto *tab = app.tabModel->activeTab();
+        tab->navigateTo(left);
+        tab->resetSecondaryTo(right);
+        tab->setSplitViewEnabled(true);
+        QTRY_COMPARE(app.window->property("splitTransitionProgress").toReal(), 1.0);
+
+        auto *primaryFrame = app.item("primaryPaneFrame");
+        auto *secondaryFrame = app.item("secondaryPaneLoader");
+        QVERIFY(primaryFrame && secondaryFrame);
+        QTRY_VERIFY(secondaryFrame->property("item").value<QQuickItem *>());
+        auto *primaryView = app.item("primaryFileView");
+        auto *secondaryView = secondaryFrame->property("item").value<QQuickItem *>()
+                                  ->property("fileView").value<QQuickItem *>();
+        QVERIFY(primaryView && secondaryView);
+        auto shellDir = [](QObject *shell) {
+            QString dir;
+            QMetaObject::invokeMethod(shell, "currentDirectory", Q_RETURN_ARG(QString, dir));
+            return dir;
+        };
+        auto sceneRect = [](QQuickItem *it) { return it->mapRectToScene(QRectF(0, 0, it->width(), it->height())); };
+        auto activePane = [&] { return app.window->property("activePane").toString(); };
+
+        // Left pane: click its empty space, F4.
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, app.center(primaryView));
+        QTRY_COMPARE(activePane(), QString("primary"));
+        QTest::keyClick(app.window, Qt::Key_F4);
+        auto *leftTerm = app.item("primaryPaneTerminal");
+        QVERIFY(leftTerm);
+        QTRY_VERIFY(leftTerm->isVisible() && leftTerm->height() > 0);
+        auto *leftShell = leftTerm->property("terminal").value<QQuickItem *>();
+        QVERIFY(leftShell);
+        QTRY_COMPARE_WITH_TIMEOUT(shellDir(leftShell), left, 5000);
+        QVERIFY(sceneRect(primaryFrame).contains(sceneRect(leftTerm).adjusted(1, 1, -1, -1)));
+
+        // Right pane: click, F4 -- a second shell, in the right folder.
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, app.center(secondaryView));
+        QTRY_COMPARE(activePane(), QString("secondary"));
+        QTest::keyClick(app.window, Qt::Key_F4);
+        auto *rightTerm = app.item("secondaryPaneTerminal");
+        QVERIFY(rightTerm);
+        QTRY_VERIFY(rightTerm->isVisible() && rightTerm->height() > 0);
+        auto *rightShell = rightTerm->property("terminal").value<QQuickItem *>();
+        QVERIFY(rightShell && rightShell != leftShell);
+        QTRY_COMPARE_WITH_TIMEOUT(shellDir(rightShell), right, 5000);
+        QVERIFY(sceneRect(secondaryFrame).contains(sceneRect(rightTerm).adjusted(1, 1, -1, -1)));
+        QVERIFY(leftTerm->isVisible());
+        QCOMPARE(shellDir(leftShell), left);
+
+        // F4 from inside the right terminal closes only the right one.
+        QTRY_VERIFY(rightShell->hasActiveFocus());
+        QTest::keyClick(app.window, Qt::Key_F4);
+        QTRY_VERIFY(!rightTerm->isVisible());
+        QVERIFY(leftTerm->isVisible());
+
+        // Clicking into the left terminal makes the left pane active and the
+        // keyboard stays in the terminal; F4 then closes the left one.
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, app.center(leftShell));
+        QTRY_COMPARE(activePane(), QString("primary"));
+        QTest::qWait(100);
+        QVERIFY(leftShell->hasActiveFocus());
+        QTest::keyClick(app.window, Qt::Key_F4);
+        QTRY_VERIFY(!leftTerm->isVisible());
+
+        // F4 again in the right pane brings back its running shell.
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, app.center(secondaryView));
+        QTRY_COMPARE(activePane(), QString("secondary"));
+        QTest::keyClick(app.window, Qt::Key_F4);
+        QTRY_VERIFY(rightTerm->isVisible());
+        QCOMPARE(rightTerm->property("terminal").value<QQuickItem *>(), rightShell);
+        QVERIFY(!leftTerm->isVisible());
+
+        // With builtin_terminal = true, Open in Terminal (Ctrl+Alt+T) in the
+        // left pane opens the left pane's terminal, not the right one's.
+        auto *config = qobject_cast<ConfigManager *>(app.engine.rootContext()->contextProperty("config").value<QObject *>());
+        QVERIFY(config);
+        config->saveSettings({{"builtinTerminal", true}});
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, app.center(primaryView));
+        QTRY_COMPARE(activePane(), QString("primary"));
+        QTest::keyClick(app.window, Qt::Key_T, Qt::ControlModifier | Qt::AltModifier);
+        QTRY_VERIFY(leftTerm->isVisible());
+        QCOMPARE(leftTerm->property("terminal").value<QQuickItem *>(), leftShell);
+        QTRY_VERIFY(leftShell->hasActiveFocus());
+        QCOMPARE(shellDir(leftShell), left);
+        QVERIFY(rightTerm->isVisible());
+        QCOMPARE(shellDir(rightShell), right);
+#endif
     }
 
     // Ctrl+Wheel over the Icons view sizes the text only: a bigger label makes
