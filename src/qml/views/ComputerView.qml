@@ -199,7 +199,7 @@ FocusScope {
                             width: parent.width * (card.freeSpace < card.totalSize ? Math.max(0.02, card.usagePercent / 100) : 0)
                             height: parent.height
                             radius: 2
-                            color: card.usagePercent >= 90 ? Theme.error : card.usagePercent >= 75 ? Theme.warning : Theme.accent
+                            color: Theme.usageColor(card.usagePercent)
                         }
                     }
                     Text {
