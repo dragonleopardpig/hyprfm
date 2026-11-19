@@ -485,9 +485,17 @@ ApplicationWindow {
 
         property string title: ""
         property bool activePaneHeader: false
+        // A press on the header bar makes its pane the active one.
+        signal activated()
 
         Layout.fillWidth: true
         Layout.preferredHeight: 34
+
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
+            onPressed: splitPaneHeader.activated()
+        }
 
         Rectangle {
             anchors.fill: parent
@@ -4746,6 +4754,8 @@ ApplicationWindow {
                             SplitPaneHeader {
                                 Layout.preferredHeight: visible ? 34 : 0
                                 visible: root.splitViewPresented
+                                objectName: "primaryPaneHeader"
+                                onActivated: root.setActivePane("primary")
                                 title: root.paneDisplayName("primary")
                                 activePaneHeader: root.activePane === "primary"
                             }
@@ -4859,6 +4869,8 @@ ApplicationWindow {
                                 spacing: 0
 
                                 SplitPaneHeader {
+                                    objectName: "secondaryPaneHeader"
+                                    onActivated: root.setActivePane("secondary")
                                     title: root.paneDisplayName("secondary")
                                     activePaneHeader: root.activePane === "secondary"
                                 }

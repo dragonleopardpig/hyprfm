@@ -752,6 +752,89 @@ private slots:
 #endif
     }
 
+    // User flag: Computer -> split -> click the left pane -> F4 -> click the
+    // right pane -> F4 closed the left terminal and opened none. A click on the
+    // Computer page did not make its pane active (only a drive card did), which
+    // also sent a sidebar place to the right pane after a click on the left one.
+    void testComputerPagesTakeClicksForTerminalsAndSidebar()
+    {
+#ifndef HYPRFM_TERMINAL
+        QSKIP("built without the built-in terminal");
+#else
+        qputenv("SHELL", "/bin/sh");
+        qputenv("ENV", "");   // no ~/.shrc for an interactive sh
+        App app;
+        app.builtinTerminal = true;
+        QVERIFY(app.load());
+        auto *tab = app.tabModel->activeTab();
+        tab->navigateTo(app.home.path());
+        auto activePane = [&] { return app.window->property("activePane").toString(); };
+
+        // Computer, then F3 for the split.
+        auto *computer = app.item("quickAccess_Computer");
+        QVERIFY(computer && computer->isVisible());
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, app.center(computer));
+        QTRY_COMPARE(tab->currentPath(), QString("computer:///"));
+        QTest::keyClick(app.window, Qt::Key_F3);
+        QTRY_COMPARE(app.window->property("splitTransitionProgress").toReal(), 1.0);
+        auto *secondaryLoader = app.item("secondaryPaneLoader");
+        QVERIFY(secondaryLoader);
+        QTRY_VERIFY(secondaryLoader->property("item").value<QQuickItem *>());
+        auto *left = app.item("primaryFileView");
+        auto *right = secondaryLoader->property("item").value<QQuickItem *>()
+                          ->property("fileView").value<QQuickItem *>();
+        QVERIFY(left && right);
+        QTRY_COMPARE(tab->secondaryCurrentPath(), QString("computer:///"));
+        QTRY_VERIFY(left->property("computerViewItem").value<QQuickItem *>()
+                    && right->property("computerViewItem").value<QQuickItem *>());
+        // The page itself, not a drive card (a card already took the click):
+        // its "Devices and drives" subtitle.
+        auto emptySpot = [&](QQuickItem *container) {
+            QQuickItem *page = container->property("computerViewItem").value<QQuickItem *>();
+            QQuickItem *subtitle = page ? App::findText(page, QStringLiteral("Devices and drives")) : nullptr;
+            return subtitle ? app.center(subtitle) : QPoint(-1, -1);
+        };
+        QVERIFY(emptySpot(left).x() >= 0 && emptySpot(right).x() >= 0);
+        auto *leftTerm = app.item("primaryPaneTerminal");
+        auto *rightTerm = app.item("secondaryPaneTerminal");
+        QVERIFY(leftTerm && rightTerm);
+
+        // Left pane click, F4: the left terminal.
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, emptySpot(left));
+        QTRY_COMPARE(activePane(), QString("primary"));
+        QTest::keyClick(app.window, Qt::Key_F4);
+        QTRY_VERIFY(leftTerm->isVisible());
+
+        // Right pane click, F4: the right terminal, and the left one stays.
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, emptySpot(right));
+        QTRY_COMPARE(activePane(), QString("secondary"));
+        QTest::keyClick(app.window, Qt::Key_F4);
+        QTRY_VERIFY(rightTerm->isVisible());
+        QVERIFY(leftTerm->isVisible());
+        auto *rightShell = rightTerm->property("terminal").value<QQuickItem *>();
+        QVERIFY(rightShell);
+        QTRY_VERIFY(rightShell->hasActiveFocus());
+
+        // Left pane click, then Home in the sidebar: Home opens on the left.
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, emptySpot(left));
+        QTRY_COMPARE(activePane(), QString("primary"));
+        QVERIFY(!rightShell->hasActiveFocus());
+        auto *home = app.item("quickAccess_Home");
+        QVERIFY(home && home->isVisible());
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, app.center(home));
+        QTRY_COMPARE(tab->currentPath(), QDir::homePath());
+        QCOMPARE(tab->secondaryCurrentPath(), QString("computer:///"));
+
+        // A press on a pane's header bar makes that pane active as well.
+        auto *rightHeader = app.item("secondaryPaneHeader");
+        QVERIFY(rightHeader && rightHeader->isVisible());
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, app.center(rightHeader));
+        QTRY_COMPARE(activePane(), QString("secondary"));
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, app.center(app.item("primaryPaneHeader")));
+        QTRY_COMPARE(activePane(), QString("primary"));
+#endif
+    }
+
     // Ctrl+Wheel over the Icons view sizes the text only: a bigger label makes
     // the cell taller instead of shrinking the icon (it used to shrink as the
     // text grew, and grow back as it shrank). Ctrl+Shift+Wheel sizes icons.
