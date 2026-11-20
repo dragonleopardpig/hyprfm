@@ -832,7 +832,7 @@ ApplicationWindow {
     function resizeGridIcons(steps) {
         const view = root.activeSubView()
         if (!view || !tabModel.activeTab || tabModel.activeTab.viewMode !== "grid" || root.paneIsComputer(activePane)) return
-        if (steps === 0) view.columnCount = view.defaultColumnCount
+        if (steps === 0) view.resetZoom()
         else view.zoomByWheel(-steps * 42)
     }
 
