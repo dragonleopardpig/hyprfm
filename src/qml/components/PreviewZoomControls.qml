@@ -107,7 +107,7 @@ Item {
     Item {
         // Input stays local to this preview; ordinary scrolling and other
         // modifiers continue to its content instead of changing file-view zoom.
-        parent: root.scope
+        parent: root.scope ? root.scope : root
         anchors.fill: parent
         z: 100
         enabled: root.available

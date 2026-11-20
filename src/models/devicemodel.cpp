@@ -15,6 +15,7 @@
 #include <QHash>
 #include <QDebug>
 #include <QMetaObject>
+#include <QMutexLocker>
 #include <QPointer>
 #include <QProcess>
 #include <QRegularExpression>
@@ -40,6 +41,7 @@ static const QStringList kVirtualTypes = {
 DeviceModel::DeviceModel(QObject *parent, bool deferInitialRefresh)
     : QAbstractListModel(parent)
 {
+    m_fuseProbeContext->model = this;
     m_refreshTimer.setSingleShot(true);
     m_refreshTimer.setInterval(600);
     connect(&m_refreshTimer, &QTimer::timeout, this, &DeviceModel::refreshAsync);
@@ -68,6 +70,10 @@ DeviceModel::DeviceModel(QObject *parent, bool deferInitialRefresh)
 
 DeviceModel::~DeviceModel()
 {
+    {
+        QMutexLocker locker(&m_fuseProbeContext->mutex);
+        m_fuseProbeContext->model = nullptr;
+    }
     clearDevices();
     if (m_volumeMonitor) {
         g_signal_handlers_disconnect_by_data(m_volumeMonitor, this);
@@ -706,8 +712,7 @@ void DeviceModel::applyUDisksReply(const QDBusMessage &reply)
             if (storage.isValid()) {
                 total = storage.bytesTotal();
                 free = storage.bytesAvailable();
-                if (total > 0)
-                    usage = static_cast<int>((total - free) * 100 / total);
+                usage = usagePercentFor(total, free);
             }
         } else {
             total = b.size;
@@ -761,7 +766,7 @@ void DeviceModel::applyUDisksReply(const QDBusMessage &reply)
                     const FuseUsage known = m_fuseUsage.value(path);
                     const qint64 total = known.total;
                     const qint64 free = known.free;
-                    const int usage = total > 0 ? static_cast<int>((total - free) * 100 / total) : 0;
+                    const int usage = usagePercentFor(total, free);
                     fuseToProbe.append(path);
                     QString name = qStringFromGChar(g_mount_get_name(mount));
                     if (name.isEmpty())
@@ -944,8 +949,8 @@ void DeviceModel::probeFuseUsage(const QString &mountPoint)
 
     // A plain detached thread, not QtConcurrent: Qt waits for its global pool at
     // exit, and a probe stuck in a dead FUSE daemon would then hang the quit.
-    QPointer<DeviceModel> self(this);
-    std::thread([self, mountPoint]() {
+    const std::shared_ptr<FuseProbeContext> ctx = m_fuseProbeContext;
+    std::thread([ctx, mountPoint]() {
         const QStorageInfo storage(mountPoint);
         qint64 total = 0;
         qint64 free = 0;
@@ -953,10 +958,11 @@ void DeviceModel::probeFuseUsage(const QString &mountPoint)
             total = storage.bytesTotal();
             free = storage.bytesAvailable();
         }
-        if (QCoreApplication *app = QCoreApplication::instance()) {
-            QMetaObject::invokeMethod(app, [self, mountPoint, total, free]() {
-                if (self)
-                    self->applyFuseUsage(mountPoint, total, free);
+        QMutexLocker locker(&ctx->mutex);
+        if (ctx->model) {
+            QMetaObject::invokeMethod(ctx->model, [ctx, mountPoint, total, free]() {
+                if (ctx->model)
+                    ctx->model->applyFuseUsage(mountPoint, total, free);
             }, Qt::QueuedConnection);
         }
     }).detach();
@@ -972,10 +978,18 @@ void DeviceModel::applyFuseUsage(const QString &mountPoint, qint64 total, qint64
             continue;
         dev.totalSize = total;
         dev.freeSpace = free;
-        dev.usagePercent = total > 0 ? static_cast<int>((total - free) * 100 / total) : 0;
+        dev.usagePercent = usagePercentFor(total, free);
         const QModelIndex idx = index(i);
         emit dataChanged(idx, idx, {TotalSizeRole, FreeSpaceRole, UsagePercentRole});
     }
+}
+
+int DeviceModel::usagePercentFor(qint64 total, qint64 free)
+{
+    if (total <= 0)
+        return 0;
+    const qint64 clampedFree = qBound(qint64(0), free, total);
+    return qBound(0, static_cast<int>(100.0 * static_cast<double>(total - clampedFree) / static_cast<double>(total)), 100);
 }
 
 // Map a /dev/<basename> path to its UDisks2 object path. D-Bus object paths
@@ -1113,6 +1127,13 @@ void DeviceModel::unmountFuse(const QString &mountPoint, const QString &label)
     }
 
     auto *process = new QProcess(this);
+    connect(process, &QProcess::errorOccurred, this,
+            [this, process, label](QProcess::ProcessError error) {
+        if (error == QProcess::FailedToStart) {
+            emit mountError(tr("Could not unmount %1: %2").arg(label, process->errorString()));
+            process->deleteLater();
+        }
+    });
     connect(process, &QProcess::finished, this,
             [this, process, label](int exitCode, QProcess::ExitStatus status) {
         if (status != QProcess::NormalExit || exitCode != 0) {

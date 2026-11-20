@@ -345,14 +345,14 @@ void DependencyChecker::populate()
     // serves (issue #10). trash.mount is where every distro registers it;
     // the lib dirs cover layouts without /usr/share/gvfs.
     const bool gvfsAvailable = hasExecutable(QStringLiteral("gio")) && (
-        gvfsReachable(QStringLiteral("org.gtk.vfs.Daemon"))
-        || !QStandardPaths::locate(QStandardPaths::GenericDataLocation, QStringLiteral("gvfs/mounts/trash.mount")).isEmpty()
+        !QStandardPaths::locate(QStandardPaths::GenericDataLocation, QStringLiteral("gvfs/mounts/trash.mount")).isEmpty()
         || hasAnyFile({
             QStringLiteral("/usr/share/gvfs/mounts/trash.mount"),
             QStringLiteral("/usr/lib/gvfs"),
             QStringLiteral("/usr/lib64/gvfs"),
             QStringLiteral("/run/current-system/sw/share/gvfs/mounts/trash.mount"),
         })
+        || gvfsReachable(QStringLiteral("org.gtk.vfs.Daemon"))
     );
     m_deps.append({
         QStringLiteral("gvfs"),
@@ -364,14 +364,14 @@ void DependencyChecker::populate()
     });
 
     const bool gvfsAfcAvailable = hasExecutable(QStringLiteral("gio")) && (
-        gvfsReachable(QStringLiteral("org.gtk.vfs.AfcVolumeMonitor"))
-        || !QStandardPaths::locate(QStandardPaths::GenericDataLocation, QStringLiteral("gvfs/mounts/afc.mount")).isEmpty()
+        !QStandardPaths::locate(QStandardPaths::GenericDataLocation, QStringLiteral("gvfs/mounts/afc.mount")).isEmpty()
         || hasAnyFile({
             QStringLiteral("/usr/share/gvfs/mounts/afc.mount"),
             QStringLiteral("/usr/lib/gvfs/gvfsd-afc"),
             QStringLiteral("/usr/lib64/gvfs/gvfsd-afc"),
             QStringLiteral("/usr/libexec/gvfsd-afc"),
         })
+        || gvfsReachable(QStringLiteral("org.gtk.vfs.AfcVolumeMonitor"))
     );
     m_deps.append({
         QStringLiteral("gvfs-afc"),
@@ -389,14 +389,14 @@ void DependencyChecker::populate()
     });
 
     const bool gvfsGphoto2Available = hasExecutable(QStringLiteral("gio")) && (
-        gvfsReachable(QStringLiteral("org.gtk.vfs.GPhoto2VolumeMonitor"))
-        || !QStandardPaths::locate(QStandardPaths::GenericDataLocation, QStringLiteral("gvfs/mounts/gphoto2.mount")).isEmpty()
+        !QStandardPaths::locate(QStandardPaths::GenericDataLocation, QStringLiteral("gvfs/mounts/gphoto2.mount")).isEmpty()
         || hasAnyFile({
             QStringLiteral("/usr/share/gvfs/mounts/gphoto2.mount"),
             QStringLiteral("/usr/lib/gvfs/gvfsd-gphoto2"),
             QStringLiteral("/usr/lib64/gvfs/gvfsd-gphoto2"),
             QStringLiteral("/usr/libexec/gvfsd-gphoto2"),
         })
+        || gvfsReachable(QStringLiteral("org.gtk.vfs.GPhoto2VolumeMonitor"))
     );
     m_deps.append({
         QStringLiteral("gvfs-gphoto2"),
@@ -414,14 +414,14 @@ void DependencyChecker::populate()
     });
 
     const bool gvfsMtpAvailable = hasExecutable(QStringLiteral("gio")) && (
-        gvfsReachable(QStringLiteral("org.gtk.vfs.MTPVolumeMonitor"))
-        || !QStandardPaths::locate(QStandardPaths::GenericDataLocation, QStringLiteral("gvfs/mounts/mtp.mount")).isEmpty()
+        !QStandardPaths::locate(QStandardPaths::GenericDataLocation, QStringLiteral("gvfs/mounts/mtp.mount")).isEmpty()
         || hasAnyFile({
             QStringLiteral("/usr/share/gvfs/mounts/mtp.mount"),
             QStringLiteral("/usr/lib/gvfs/gvfsd-mtp"),
             QStringLiteral("/usr/lib64/gvfs/gvfsd-mtp"),
             QStringLiteral("/usr/libexec/gvfsd-mtp"),
         })
+        || gvfsReachable(QStringLiteral("org.gtk.vfs.MTPVolumeMonitor"))
     );
     m_deps.append({
         QStringLiteral("gvfs-mtp"),
@@ -693,6 +693,10 @@ bool DependencyChecker::udisks2Reachable()
 
 bool DependencyChecker::gvfsReachable(const QString &service)
 {
+    const QString serviceFile = QStringLiteral("dbus-1/services/") + service + QStringLiteral(".service");
+    if (!QStandardPaths::locate(QStandardPaths::GenericDataLocation, serviceFile).isEmpty())
+        return true;
+
     auto *iface = QDBusConnection::sessionBus().interface();
     if (iface) {
         if (iface->isServiceRegistered(service))
@@ -710,10 +714,6 @@ bool DependencyChecker::gvfsReachable(const QString &service)
                 return true;
         }
     }
-
-    const QString serviceFile = QStringLiteral("dbus-1/services/") + service + QStringLiteral(".service");
-    if (!QStandardPaths::locate(QStandardPaths::GenericDataLocation, serviceFile).isEmpty())
-        return true;
 
     return false;
 }

@@ -1164,6 +1164,7 @@ void FileSystemModel::reload()
     const QUrl location(m_rootPath);
     if (location.scheme() == QStringLiteral("computer") && location.host().isEmpty()
         && (location.path().isEmpty() || location.path() == QStringLiteral("/"))) {
+        setLoadError(0);
         beginResetModel();
         m_entries.clear();
         m_remoteEntries.clear();

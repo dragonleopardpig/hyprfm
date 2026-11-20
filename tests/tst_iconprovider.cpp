@@ -105,6 +105,9 @@ private slots:
         // Explicit URL colors win even before the application updates provider state.
         QCOMPARE(render("folder?accent=%23ff0000&background=%231e1e2e"), redFolder);
         QCOMPARE(render("text-plain?name=spaces%20%26%20hash%23.rs"), render("text-plain?name=main.rs"));
+        // Distinct filenames that map to the same icon share the cached image instead of re-rendering per file.
+        QCOMPARE(render("text-plain?name=first.rs").cacheKey(), render("text-plain?name=second.rs").cacheKey());
+        QCOMPARE(render("inode-directory?name=FolderA").cacheKey(), render("inode-directory?name=FolderB").cacheKey());
     }
 
     void testConstruction()

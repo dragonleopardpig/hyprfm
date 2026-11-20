@@ -1119,21 +1119,28 @@ ApplicationWindow {
         }
 
         if (!enable) {
+            const secTerm = root.paneTerminal("secondary")
+            if (secTerm && secTerm.open)
+                secTerm.open = false
             if (activePane === "secondary") {
-                const selected = root.getSelectedPaths("secondary")
+                const fromComputer = root.paneIsComputer("secondary")
+                const selected = fromComputer ? [] : root.getSelectedPaths("secondary")
                 const view = root.activeSubView()
-                const cursorPath = view ? root.filePathFromModel(root.paneModel("secondary"), view.cursorIndex) : ""
+                const cursorPath = (!fromComputer && view)
+                    ? root.filePathFromModel(root.paneModel("secondary"), view.cursorIndex) : ""
                 // The primary pane takes over the secondary's folder; its own
                 // search or filter belonged to the folder it is leaving.
                 root.clearPaneSearch("primary")
                 tabModel.activeTab.navigateTo(tabModel.activeTab.secondaryCurrentPath)
                 root.setPaneRecents("primary", root.paneIsRecents("secondary"))
-                primaryFileViewContainer.restoreSelection(selected, cursorPath, tabModel.activeTab.currentPath)
+                if (!fromComputer)
+                    primaryFileViewContainer.restoreSelection(selected, cursorPath, tabModel.activeTab.currentPath)
             }
             root.clearPaneSearch("secondary")
             root.setPaneRecents("secondary", false)
             if (activePane === "secondary")
                 activePane = "primary"
+            root.scheduleActivePaneFocus()
         }
 
         tabModel.activeTab.splitViewEnabled = enable
@@ -1509,6 +1516,10 @@ ApplicationWindow {
         return !!(view && view.inlineEdit && (view.inlineEdit.active || view.inlineEdit.pending))
     }
 
+    function joinChildPath(parentPath, name) {
+        return parentPath === "/" ? "/" + name : parentPath + "/" + name
+    }
+
     // Rename PATH to NAME; "" on success, else the reason to show.
     // keepSelection: the user clicked elsewhere, so the selection stays there.
     function renameEntry(path, name, keepSelection) {
@@ -1516,7 +1527,7 @@ ApplicationWindow {
             return ""
         if (name.indexOf("/") >= 0)
             return "A name cannot contain \u201c/\u201d"
-        const targetPath = fileOps.parentPath(path) + "/" + name
+        const targetPath = root.joinChildPath(fileOps.parentPath(path), name)
         if (targetPath === path)
             return ""
         if (fileOps.pathExists(targetPath))
@@ -1537,7 +1548,7 @@ ApplicationWindow {
 
     function uniqueChildName(parentPath, base) {
         var name = base
-        for (var i = 2; fileOps.pathExists(parentPath + "/" + name); ++i)
+        for (var i = 2; fileOps.pathExists(root.joinChildPath(parentPath, name)); ++i)
             name = base + " " + i
         return name
     }
@@ -1550,7 +1561,7 @@ ApplicationWindow {
                 || root.paneIsRecents(root.activePane) || root.paneShowsSearchResults(root.activePane))
             return false
         const name = root.uniqueChildName(parentPath, isFolder ? "New Folder" : "New File")
-        const created = parentPath + "/" + name
+        const created = root.joinChildPath(parentPath, name)
         if (fileOps.isRemotePath(parentPath)) {
             if (isFolder) fileOps.createFolder(parentPath, name)
             else fileOps.createFile(parentPath, name)
@@ -3853,7 +3864,9 @@ ApplicationWindow {
         sequence: config.shortcutMap["refresh"]
         onActivated: {
             if (root.paneIsComputer(activePane)) {
-                root.activeSubView().refresh()
+                const view = root.activeSubView()
+                if (view && view.refresh)
+                    view.refresh()
                 return
             }
             fsModel.refresh()

@@ -1121,7 +1121,7 @@ int main(int argc, char *argv[])
         if (session.contains("gridIconSize"))
             w->sessionState->setGridIconSize(session.value("gridIconSize").toInt());
         else if (const int columns = session.value("gridColumns").toInt(); columns > 0)
-            w->sessionState->setGridIconSize(qRound(1600.0 / columns) - 45);
+            w->sessionState->setGridIconSize(qBound(32, qRound(1600.0 / columns) - 45, 512));
         w->sessionState->setRowHeightDetailed(session.value("rowHeightDetailed").toInt());
         w->sessionState->setRowHeightMiller(session.value("rowHeightMiller").toInt());
         w->sessionState->setRowHeightCompact(session.value("rowHeightCompact").toInt());

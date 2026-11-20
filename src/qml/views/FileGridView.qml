@@ -112,7 +112,9 @@ GridView {
         zoomIconSize = Math.max(minIconSize, Math.min(maxIconSize, size))
     }
     function resetZoom() {
-        if (config.gridFixedColumns || compactMode)
+        if (compactMode)
+            rowHeight = Math.max(minRowHeight, 28)
+        else if (config.gridFixedColumns)
             columnCount = defaultColumnCount
         else
             setZoomIconSize(defaultIconSize, true)

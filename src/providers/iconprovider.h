@@ -138,23 +138,38 @@ public:
         bool isSymbolic = iconName.endsWith("-symbolic");
 
         const QString tintKey = tintColor.isValid() ? tintColor.name(QColor::HexArgb) : QString();
+        const int logicalSize = param("logicalSize").toInt() > 0 ? param("logicalSize").toInt() : sz;
+        const bool gridContext = param("context") == QLatin1String("grid");
+        const double strokeScale = params.hasQueryItem(QStringLiteral("strokeScale"))
+            ? qBound(0.0, param("strokeScale").toDouble(), 10.0) : 1.0;
         QStringList primaryDirs;
         QStringList fallbackDirs;
         QString cacheKey;
         QColor accent, background;
         bool themeColors;
         QString primaryTheme;
+        bool useStrata = false;
+        QString resolvedIcon;
         {
             QMutexLocker locker(&m_cacheMutex);
             primaryTheme = m_primaryTheme;
+            useStrata = (primaryTheme == QLatin1String("Strata") || iconName.startsWith(QLatin1String("strata-")));
+            resolvedIcon = useStrata ? StrataIcons::resolve(iconName, param("name")) : iconName;
             accent = QColor(param("accent"));
             if (!accent.isValid()) accent = m_accent;
             background = QColor(param("background"));
             if (!background.isValid()) background = m_background;
             themeColors = params.hasQueryItem("fileColors") ? param("fileColors") == "theme" : m_themeColors;
-            cacheKey = id + accent.name() + background.name() + QString::number(themeColors) + m_primaryTheme + QLatin1Char('\x1f')
+            cacheKey = primaryTheme + QLatin1Char('\x1f')
+                + resolvedIcon + QLatin1Char('\x1f')
                 + iconName + QLatin1Char('\x1f')
                 + QString::number(sz) + QLatin1Char('\x1f')
+                + QString::number(logicalSize) + QLatin1Char('\x1f')
+                + QString::number(gridContext) + QLatin1Char('\x1f')
+                + QString::number(strokeScale, 'g', 4) + QLatin1Char('\x1f')
+                + accent.name(QColor::HexArgb) + QLatin1Char('\x1f')
+                + background.name(QColor::HexArgb) + QLatin1Char('\x1f')
+                + QString::number(themeColors) + QLatin1Char('\x1f')
                 + tintKey + QLatin1Char('\x1f')
                 + revision;
             if (const QImage *cached = m_cache.object(cacheKey)) {
@@ -167,12 +182,9 @@ public:
             fallbackDirs = m_fallbackDirs;
         }
 
-        if (primaryTheme == "Strata" || iconName.startsWith("strata-")) {
-            const QString name = StrataIcons::resolve(iconName, param("name"));
-            const int logicalSize = param("logicalSize").toInt() > 0 ? param("logicalSize").toInt() : sz;
-            QImage bundled = StrataIcons::render(name, sz, tintColor.isValid() ? tintColor : accent,
-                                                 background, themeColors, logicalSize, param("context") == "grid",
-                                                 params.hasQueryItem("strokeScale") ? qBound(0.0, param("strokeScale").toDouble(), 10.0) : 1.0);
+        if (useStrata) {
+            QImage bundled = StrataIcons::render(resolvedIcon, sz, tintColor.isValid() ? tintColor : accent,
+                                                 background, themeColors, logicalSize, gridContext, strokeScale);
             if (!bundled.isNull()) {
                 if (size) *size = bundled.size();
                 remember(cacheKey, bundled);

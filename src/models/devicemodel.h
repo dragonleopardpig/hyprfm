@@ -3,9 +3,11 @@
 #include <QAbstractListModel>
 #include <QFileSystemWatcher>
 #include <QHash>
+#include <QMutex>
 #include <QSet>
 #include <QList>
 #include <QTimer>
+#include <memory>
 
 typedef struct _GMount GMount;
 typedef struct _GVolume GVolume;
@@ -71,6 +73,7 @@ public:
     // phones and FUSE mounts (GIO), and drives auto-mounted under /run/media or
     // /media -- never /, nor fixed mounts such as /mnt/... from fstab.
     static bool isUserUnmountable(const QString &mountPoint, bool gioBackend);
+    static int usagePercentFor(qint64 total, qint64 free);
 
 public slots:
     void refresh();
@@ -96,6 +99,11 @@ private:
     // Size of each user FUSE mount, as last answered, so a refresh shows it at once;
     // probes in flight, at most one per mount (a hung daemon keeps its probe).
     struct FuseUsage { qint64 total = 0; qint64 free = 0; };
+    struct FuseProbeContext {
+        QMutex mutex;
+        DeviceModel *model = nullptr;
+    };
+    std::shared_ptr<FuseProbeContext> m_fuseProbeContext = std::make_shared<FuseProbeContext>();
     QHash<QString, FuseUsage> m_fuseUsage;
     QSet<QString> m_fuseProbesPending;
 

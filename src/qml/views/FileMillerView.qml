@@ -1353,8 +1353,8 @@ FocusScope {
             readonly property bool isAudio: !isRemoteUri && !previewIsDir && (_mime.startsWith("audio/") || false)
             readonly property bool isPdf: !isRemoteUri && !previewIsDir && _mime === "application/pdf"
             readonly property bool pdfPreviewAvailable: previewService ? previewService.pdfPreviewAvailable : false
-            readonly property bool videoPreviewAvailable: runtimeFeatures.ffmpegAvailable
-            readonly property bool textHighlightAvailable: runtimeFeatures.batAvailable
+            readonly property bool videoPreviewAvailable: typeof runtimeFeatures !== "undefined" && runtimeFeatures ? runtimeFeatures.ffmpegAvailable : false
+            readonly property bool textHighlightAvailable: typeof runtimeFeatures !== "undefined" && runtimeFeatures ? runtimeFeatures.batAvailable : false
             readonly property bool hasVisualPreview: isImage || (isVideo && videoPreviewAvailable)
             readonly property string visualSource: {
                 if (!hasVisualPreview || previewFilePath === "") return ""
@@ -1515,7 +1515,7 @@ FocusScope {
                 // handles local / trash:// / remote URIs internally.
                 // This is an in-memory lookup, so the info bar updates
                 // immediately while the body is still being read.
-                if (fsModel && fsModel.fileProperties)
+                if (typeof fsModel !== "undefined" && fsModel && fsModel.fileProperties)
                     fileProps = fsModel.fileProperties(previewFilePath)
                 else
                     fileProps = ({})
@@ -1963,7 +1963,7 @@ FocusScope {
                             && !previewColumn.textPreview.isBinary
                             && !previewColumn.textPreview.usesBat
                             && !previewColumn.textHighlightAvailable
-                        text: runtimeFeatures.installHint("textHighlight")
+                        text: typeof runtimeFeatures !== "undefined" && runtimeFeatures ? runtimeFeatures.installHint("textHighlight") : ""
                         color: Theme.subtext
                         font.pointSize: Theme.fontSmall
                         wrapMode: Text.WrapAtWordBoundaryOrAnywhere
@@ -2002,7 +2002,7 @@ FocusScope {
                             textFormat: Text.PlainText
                             text: previewColumn.pdfPreview.error !== ""
                                 ? previewColumn.pdfPreview.error
-                                : runtimeFeatures.installHint("pdfPreview")
+                                : (typeof runtimeFeatures !== "undefined" && runtimeFeatures ? runtimeFeatures.installHint("pdfPreview") : "")
                             color: Theme.subtext
                             font.pointSize: Theme.fontSmall
                             wrapMode: Text.WrapAtWordBoundaryOrAnywhere

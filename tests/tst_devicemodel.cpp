@@ -164,6 +164,13 @@ private slots:
             QVERIFY2(usage <= 100,
                 qPrintable(QString("Row %1: usagePercent %2 > 100").arg(i).arg(usage)));
         }
+
+        // Synthetic 1 EiB quota and out-of-range free values must not overflow qint64 or leave [0, 100].
+        const qint64 oneEiB = qint64(1) << 60;
+        QCOMPARE(DeviceModel::usagePercentFor(oneEiB, oneEiB / 4), 75);
+        QCOMPARE(DeviceModel::usagePercentFor(oneEiB, oneEiB * 2), 0);
+        QCOMPARE(DeviceModel::usagePercentFor(oneEiB, -1), 100);
+        QCOMPARE(DeviceModel::usagePercentFor(0, 0), 0);
     }
 
     void testUserUnmountableRule()
