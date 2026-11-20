@@ -40,8 +40,9 @@ private slots:
         QCOMPARE(roles.value(DeviceModel::RemovableRole),    QByteArray("removable"));
         QCOMPARE(roles.value(DeviceModel::MountedRole),      QByteArray("mounted"));
         QCOMPARE(roles.value(DeviceModel::BackendRole),      QByteArray("backend"));
+        QCOMPARE(roles.value(DeviceModel::UserUnmountableRole), QByteArray("userUnmountable"));
 
-        QCOMPARE(roles.size(), 9);
+        QCOMPARE(roles.size(), 10);
     }
 
     void testRootDevicePresent()
@@ -163,6 +164,20 @@ private slots:
             QVERIFY2(usage <= 100,
                 qPrintable(QString("Row %1: usagePercent %2 > 100").arg(i).arg(usage)));
         }
+    }
+
+    void testUserUnmountableRule()
+    {
+        // what the sidebar offers to unmount with one click
+        QVERIFY(DeviceModel::isUserUnmountable("/run/media/u/USB", false));
+        QVERIFY(DeviceModel::isUserUnmountable("/media/USB", false));
+        QVERIFY(DeviceModel::isUserUnmountable("/home/u/Google Drive", true));
+        QVERIFY(DeviceModel::isUserUnmountable("mtp://phone/", true));
+        QVERIFY(!DeviceModel::isUserUnmountable("/", false));
+        QVERIFY(!DeviceModel::isUserUnmountable("/", true));
+        QVERIFY(!DeviceModel::isUserUnmountable("/mnt/winapps", false));
+        QVERIFY(!DeviceModel::isUserUnmountable("/home", false));
+        QVERIFY(!DeviceModel::isUserUnmountable("", true));
     }
 
     void testUserFuseMountFilter()

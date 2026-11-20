@@ -50,6 +50,7 @@ public:
         RemovableRole,
         MountedRole,
         BackendRole,
+        UserUnmountableRole,
     };
 
     explicit DeviceModel(QObject *parent = nullptr, bool deferInitialRefresh = false);
@@ -66,6 +67,10 @@ public:
     // remote (Google Drive, Filen, ...), sshfs and the like.  These are listed
     // as devices while mounted, with their size, and unmounted with fusermount.
     static bool isUserFuseMount(const QString &fsType, const QString &path, const QString &home);
+    // Mounted by the user, so the sidebar may offer to unmount it with one click:
+    // phones and FUSE mounts (GIO), and drives auto-mounted under /run/media or
+    // /media -- never /, nor fixed mounts such as /mnt/... from fstab.
+    static bool isUserUnmountable(const QString &mountPoint, bool gioBackend);
 
 public slots:
     void refresh();
