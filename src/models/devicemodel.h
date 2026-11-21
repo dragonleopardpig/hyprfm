@@ -31,6 +31,11 @@ struct DeviceEntry {
     DeviceBackend backend = DeviceBackend::UDisks2;
     GVolume *gioVolume = nullptr;
     GMount *gioMount = nullptr;
+    // A locked encrypted container (LUKS, BitLocker): mounting it means
+    // unlocking it first.  Once unlocked, its opened filesystem is listed
+    // instead and the container itself is not.  (Last, so the positional
+    // initialisers above stay valid.)
+    bool    encrypted = false;
 };
 
 class QDBusMessage;
@@ -51,6 +56,7 @@ public:
         MountedRole,
         BackendRole,
         UserUnmountableRole,
+        EncryptedRole,
     };
 
     explicit DeviceModel(QObject *parent = nullptr, bool deferInitialRefresh = false);
@@ -61,7 +67,22 @@ public:
     QHash<int, QByteArray> roleNames() const override;
 
     Q_INVOKABLE void unmount(int index);
+    // On a locked encrypted container this asks for its passphrase
+    // (unlockRequested) instead of mounting.
     Q_INVOKABLE void mount(int index);
+    // Unlock an encrypted container with its passphrase, then mount what it
+    // holds.  Answered by deviceUnlocked or unlockFailed (and then
+    // deviceMounted or mountError).  By device path: the row may move while the
+    // user types.
+    Q_INVOKABLE void unlock(const QString &devicePath, const QString &passphrase);
+
+    // A readable name for a filesystem without a label, e.g. "2.0 TB FAT
+    // volume", in place of the UUID that names its automatic mount point.
+    static QString fallbackName(qint64 size, const QString &idType);
+    // A mount point named after a filesystem UUID or serial (what udisks uses
+    // for an unlabelled filesystem): "E79B-1256", "63f1d802-9a75-...".
+    static bool looksLikeVolumeId(const QString &name);
+    static bool isWrongPassphraseError(const QString &message);
 
     // A FUSE filesystem the user mounted inside their home folder -- an rclone
     // remote (Google Drive, Filen, ...), sshfs and the like.  These are listed
@@ -81,6 +102,9 @@ public slots:
 signals:
     void deviceMounted(const QString &mountPoint);
     void mountError(const QString &message);
+    void unlockRequested(const QString &devicePath, const QString &name);
+    void deviceUnlocked(const QString &devicePath);
+    void unlockFailed(const QString &devicePath, const QString &message);
 
 private:
     void applyUDisksReply(const QDBusMessage &reply);
@@ -91,6 +115,8 @@ private:
     void setupMtpWatcher();
     static bool isVirtual(const QString &fsType);
     void unmountFuse(const QString &mountPoint, const QString &label);
+    void mountUDisksFilesystem(const QString &objectPath, const QString &fsType,
+                               const QString &label);
     void probeMountUsage(const QString &mountPoint);
     void applyMountUsage(const QString &mountPoint, qint64 total, qint64 free);
 
