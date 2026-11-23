@@ -76,13 +76,14 @@ struct FakeDrives
     {
         devices.setItemRoleNames({{Qt::UserRole + 1, "deviceName"}, {Qt::UserRole + 2, "devicePath"},
                                   {Qt::UserRole + 3, "mountPoint"}, {Qt::UserRole + 4, "totalSize"},
-                                  {Qt::UserRole + 5, "freeSpace"}, {Qt::UserRole + 6, "mounted"}});
-        append("Data", "/dev/fake-data", mount, 1000, 500, true);
-        append("USB A", "", "", 0, 0, false);
+                                  {Qt::UserRole + 5, "freeSpace"}, {Qt::UserRole + 6, "mounted"},
+                                  {Qt::UserRole + 7, "fileSystemType"}});
+        append("Data", "/dev/fake-data", mount, 1000, 500, true, "btrfs");
+        append("USB A", "", "", 4096, 0, false, "exfat");
         append("USB B", "", "", 0, 0, false);
     }
     void append(const QString &name, const QString &device, const QString &mount,
-                qint64 total, qint64 free, bool mounted)
+                qint64 total, qint64 free, bool mounted, const QString &fileSystemType = {})
     {
         auto *item = new QStandardItem;
         item->setData(name, Qt::UserRole + 1);
@@ -91,6 +92,7 @@ struct FakeDrives
         item->setData(total, Qt::UserRole + 4);
         item->setData(free, Qt::UserRole + 5);
         item->setData(mounted, Qt::UserRole + 6);
+        item->setData(fileSystemType, Qt::UserRole + 7);
         devices.appendRow(item);
     }
 };
@@ -3900,6 +3902,66 @@ private slots:
     static QVariantList selectedDrives(QQuickItem *view)
     {
         return view->property("selectedDevices").toList();
+    }
+
+    void testComputerBackgroundAndDriveProperties()
+    {
+        App app;
+        const QString mount = app.home.path() + "/data";
+        QVERIFY(QDir().mkpath(mount));
+        FakeDrives drives(mount);
+        QVERIFY(app.load());
+        ComputerModel *model = nullptr;
+        auto *view = showFakeComputer(app, drives, &model);
+        QVERIFY(view);
+        const int data = driveIndex(model, "Data");
+        const int usb = driveIndex(model, "USB A");
+        QVERIFY(data >= 0 && usb >= 0);
+        const QString dataCard = QString("computerDrive_%1").arg(data);
+        const QString usbCard = QString("computerDrive_%1").arg(usb);
+        QTRY_VERIFY(App::findItem(view, dataCard));
+        QTRY_VERIFY(App::findItem(view, usbCard));
+
+        QTest::mouseClick(app.window, Qt::LeftButton, Qt::NoModifier, app.center(App::findItem(view, dataCard)));
+        QTest::mouseClick(app.window, Qt::LeftButton, Qt::ControlModifier, app.center(App::findItem(view, usbCard)));
+        QCOMPARE(selectedDrives(view), (QVariantList{data, usb}));
+        auto *grid = App::findItem(view, "computerDriveGrid");
+        QVERIFY(grid);
+        const QPoint background = grid->mapToScene(QPointF(grid->width() / 2, grid->height() - 12)).toPoint();
+        QTest::mouseClick(app.window, Qt::LeftButton, Qt::NoModifier, background);
+        QCOMPARE(selectedDrives(view), QVariantList{});
+        QCOMPARE(view->property("cursorIndex").toInt(), -1);
+        QCOMPARE(view->property("anchorIndex").toInt(), -1);
+
+        QTest::mouseClick(app.window, Qt::RightButton, Qt::NoModifier, app.center(App::findItem(view, dataCard)));
+        QTRY_VERIFY(app.item("computerDrivePropertiesAction") && app.item("computerDrivePropertiesAction")->isVisible());
+        QTest::mouseClick(app.window, Qt::LeftButton, Qt::NoModifier, app.center(app.item("computerDrivePropertiesAction")));
+        QTRY_VERIFY(app.item("drivePropertiesDialog") && app.item("drivePropertiesDialog")->isVisible());
+        auto *dialog = app.item("drivePropertiesDialog");
+        const auto value = [&](const QString &key) {
+            auto *field = App::findItem(dialog, "driveProperty-" + key);
+            return field ? field->property("text").toString() : QString{};
+        };
+        QCOMPARE(dialog->property("subtitle").toString(), QString("Data"));
+        QCOMPARE(value("status"), QString("Mounted"));
+        QCOMPARE(value("device"), QString("/dev/fake-data"));
+        QCOMPARE(value("filesystem"), QString("btrfs"));
+        QCOMPARE(value("mount"), mount);
+        QCOMPARE(value("capacity"), QString("1000 B"));
+        QCOMPARE(value("used"), QString("500 B"));
+        QCOMPARE(value("available"), QString("500 B"));
+        QTest::keyClick(app.window, Qt::Key_Escape);
+        QTRY_VERIFY(!dialog->isVisible());
+
+        QTest::mouseClick(app.window, Qt::RightButton, Qt::NoModifier, app.center(App::findItem(view, usbCard)));
+        QTRY_VERIFY(app.item("computerDrivePropertiesAction") && app.item("computerDrivePropertiesAction")->isVisible());
+        QTest::mouseClick(app.window, Qt::LeftButton, Qt::NoModifier, app.center(app.item("computerDrivePropertiesAction")));
+        QTRY_VERIFY(dialog->isVisible());
+        QCOMPARE(dialog->property("subtitle").toString(), QString("USB A"));
+        QCOMPARE(value("status"), QString("Not mounted"));
+        QCOMPARE(value("filesystem"), QString("exfat"));
+        QCOMPARE(value("capacity"), QString("4 KB"));
+        QVERIFY(value("available").isEmpty());
     }
 
     // Ctrl+Shift+Return needs one mounted drive; an unmounted drive or several

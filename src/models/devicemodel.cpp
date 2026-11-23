@@ -1355,6 +1355,8 @@ QVariant DeviceModel::data(const QModelIndex &index, int role) const
         return d.mounted && isUserUnmountable(d.mountPoint, d.backend == DeviceBackend::Gio);
     case EncryptedRole:
         return d.encrypted;
+    case FileSystemTypeRole:
+        return d.fsType;
     }
     return {};
 }
@@ -1420,5 +1422,6 @@ QHash<int, QByteArray> DeviceModel::roleNames() const
         {BackendRole,      "backend"},
         {UserUnmountableRole, "userUnmountable"},
         {EncryptedRole,    "encrypted"},
+        {FileSystemTypeRole, "fileSystemType"},
     };
 }

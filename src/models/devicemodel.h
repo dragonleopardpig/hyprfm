@@ -57,6 +57,7 @@ public:
         BackendRole,
         UserUnmountableRole,
         EncryptedRole,
+        FileSystemTypeRole,
     };
 
     explicit DeviceModel(QObject *parent = nullptr, bool deferInitialRefresh = false);
