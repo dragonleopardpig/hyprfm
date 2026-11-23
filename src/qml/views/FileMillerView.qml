@@ -687,7 +687,7 @@ FocusScope {
                 root.selectionChanged()
             }
 
-            function activateCurrentSelection() {
+            function activateCurrentSelection(enterPreview) {
                 var idx = cursorIndex >= 0 ? cursorIndex
                     : (selectedIndices.length > 0 ? selectedIndices[selectedIndices.length - 1] : -1)
                 if (idx < 0) return
@@ -695,6 +695,8 @@ FocusScope {
                 var isDir = isDirForRow(idx)
                 if (isDir) {
                     root.enterDirectory(fp)
+                } else if (enterPreview) {
+                    root.focusNextColumn()
                 } else {
                     root.fileActivated(fp, false)
                 }
@@ -811,10 +813,6 @@ FocusScope {
 
             Keys.onUpPressed: (event) => moveSelection(-1, event.modifiers & Qt.ShiftModifier)
             Keys.onDownPressed: (event) => moveSelection(1, event.modifiers & Qt.ShiftModifier)
-            Keys.onRightPressed: (event) => {
-                activateCurrentSelection()
-                event.accepted = true
-            }
             Keys.onLeftPressed: (event) => {
                 root.goUp()
                 event.accepted = true
@@ -832,6 +830,11 @@ FocusScope {
                 }
                 if (config.keyEventMatches("open", event.key, event.modifiers)) {
                     activateCurrentSelection()
+                    event.accepted = true
+                    return
+                }
+                if (event.key === Qt.Key_Right && (event.modifiers & ~Qt.KeypadModifier) === 0) {
+                    activateCurrentSelection(true)
                     event.accepted = true
                     return
                 }
@@ -1482,11 +1485,13 @@ FocusScope {
             }
 
             Keys.onPressed: event => {
-                if (!isPdf || (event.modifiers & ~Qt.KeypadModifier) !== 0)
+                if ((event.modifiers & ~Qt.KeypadModifier) !== 0)
                     return
-                if (event.key === Qt.Key_Up || event.key === Qt.Key_PageUp)
+                if (event.key === Qt.Key_Left)
+                    root.focusPreviousColumn()
+                else if (isPdf && (event.key === Qt.Key_Up || event.key === Qt.Key_PageUp))
                     changePdfPage(-1)
-                else if (event.key === Qt.Key_Down || event.key === Qt.Key_PageDown)
+                else if (isPdf && (event.key === Qt.Key_Down || event.key === Qt.Key_PageDown))
                     changePdfPage(1)
                 else
                     return
