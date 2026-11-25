@@ -16,12 +16,11 @@ namespace {
 // directories, not by asking gvfs for a trash:// listing — undoing a trash
 // has to work on installs with no gvfs session daemon, same as the trash
 // view itself. Returns the real path under <trash>/files.
-QString latestTrashedPathForOriginalPath(const QString &originalPath)
+QString latestTrashedPathForOriginalPath(const QString &originalPath, const QList<XdgTrash::Entry> &entries)
 {
     QString latestPath;
     QDateTime latestDeletedAt;
 
-    const QList<XdgTrash::Entry> entries = XdgTrash::scan();
     for (const XdgTrash::Entry &entry : entries) {
         if (QDir::cleanPath(entry.originalPath) != originalPath)
             continue;
@@ -367,9 +366,10 @@ void UndoManager::executeRedo(const UndoRecord &rec)
 void UndoManager::restoreFromTrash(const QStringList &originalPaths)
 {
     QStringList restoreTargets;
+    const QList<XdgTrash::Entry> entries = XdgTrash::scan();
 
     for (const QString &origPath : originalPaths) {
-        const QString trashUri = latestTrashedPathForOriginalPath(QDir::cleanPath(origPath));
+        const QString trashUri = latestTrashedPathForOriginalPath(QDir::cleanPath(origPath), entries);
         if (!trashUri.isEmpty())
             restoreTargets.append(trashUri);
     }

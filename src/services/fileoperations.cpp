@@ -838,6 +838,12 @@ QString matchingTrashFilesRoot(const QString &path)
     const QString homeFiles = homeTrashFilesPath();
     if (cleanPath == homeFiles || cleanPath.startsWith(homeFiles + QLatin1Char('/')))
         return homeFiles;
+    const QString data = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
+    if (!data.isEmpty()) {
+        const QString dataFiles = QDir(data).filePath(QStringLiteral("Trash/files"));
+        if (cleanPath == dataFiles || cleanPath.startsWith(dataFiles + QLatin1Char('/')))
+            return dataFiles;
+    }
     if (!cleanPath.contains(QLatin1String("/.Trash-"))
         && !cleanPath.contains(QLatin1String("/.Trash/")))
         return {};

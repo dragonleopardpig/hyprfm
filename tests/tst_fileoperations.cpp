@@ -1310,6 +1310,45 @@ private slots:
         QVERIFY(ops.isTrashPath(expectedTrashPath + "/example.txt"));
     }
 
+    void testRestoreFromCustomDataHome()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const bool wasSet = qEnvironmentVariableIsSet("XDG_DATA_HOME");
+        const QByteArray previous = qgetenv("XDG_DATA_HOME");
+        const bool testMode = QStandardPaths::isTestModeEnabled();
+        const auto reset = qScopeGuard([&] {
+            if (wasSet)
+                qputenv("XDG_DATA_HOME", previous);
+            else
+                qunsetenv("XDG_DATA_HOME");
+            QStandardPaths::setTestModeEnabled(testMode);
+        });
+        qputenv("XDG_DATA_HOME", dir.filePath("data").toUtf8());
+        QStandardPaths::setTestModeEnabled(false);
+        const QString root = dir.filePath("data/Trash");
+        QVERIFY(QDir().mkpath(root + "/files"));
+        QVERIFY(QDir().mkpath(root + "/info"));
+        const QString original = dir.filePath("example.png");
+        QFile file(root + "/files/example.png");
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.close();
+        QFile info(root + "/info/example.png.trashinfo");
+        QVERIFY(info.open(QIODevice::WriteOnly));
+        info.write("[Trash Info]\nPath=" + QUrl::toPercentEncoding(original, "/") + "\n");
+        info.close();
+
+        FileOperations ops;
+        QVERIFY(ops.isTrashPath(file.fileName()));
+        QSignalSpy finished(&ops, &FileOperations::operationFinished);
+        QVERIFY(ops.restoreFromTrash({file.fileName()}) >= 0);
+        QTRY_COMPARE(finished.size(), 1);
+        QVERIFY(finished.first().first().toBool());
+        QVERIFY(QFile::exists(original));
+        QVERIFY(!file.exists());
+        QVERIFY(!info.exists());
+    }
+
     void testTrashHelpersForMountedVolume()
     {
         const QString mediaRoot = "/run/media/" + qEnvironmentVariable("USER");
