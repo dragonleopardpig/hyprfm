@@ -118,10 +118,14 @@ FocusScope {
             return true
         return ["ttf", "otf", "woff", "woff2"].indexOf(fileExtension) >= 0
     }
+    readonly property bool sourceAvailable: !isRemoteUri && !isDirectory && filePath !== ""
+        && (isSvg || (previewService && previewService.hasSourceView(fileName)))
+    readonly property bool showingSource: sourceAvailable && previewLoader.showingSource
     readonly property bool isText: {
+        if (showingSource) return true
         if (isRemoteUri || isDirectory || isPdf || isImage || isVideo || isAudio || isArchive || isFont)
             return false
-        if (_mime.startsWith("text/"))
+        if (_mime.startsWith("text/") || sourceAvailable)
             return true
         var textMimes = [
             "application/json", "application/xml", "application/x-yaml",
@@ -143,19 +147,17 @@ FocusScope {
                        "patch", "cmake", "qml", "mk", "desktop"]
         return textExt.indexOf(fileExtension) >= 0
     }
-    // The service decides what it rendered: md2html failing falls back to
-    // bat, and highlighted source must keep the monospace no-wrap
-    // treatment rather than be laid out as a document on the strength of an
-    // extension alone.
-    readonly property bool isMarkdown: textPreview.markdown === true
+    // Only rendered documents use proportional text and wrap to the pane.
+    readonly property bool isRichDocument: textPreview.markdown === true
+        || textPreview.htmlDocument === true
     readonly property bool isTable: textPreview.table !== undefined
     // A document's own folder, for the relative image paths a README is
     // written against ("docs/screenshots/grid-view.png"). Without it Qt
     // resolves them against the qrc: path this component was loaded from and
     // draws a broken-image glyph for every one. Each segment is encoded, so a
     // folder with a space or a '#' in its name still resolves.
-    readonly property url markdownBaseUrl: {
-        if (!root.isMarkdown || root.filePath === "")
+    readonly property url documentBaseUrl: {
+        if (!root.isRichDocument || root.filePath === "")
             return ""
         var dir = root.filePath.substring(0, root.filePath.lastIndexOf("/"))
         return "file://" + dir.split("/").map(encodeURIComponent).join("/") + "/"
@@ -168,6 +170,7 @@ FocusScope {
         if (isArchive) return "archive"
         if (isPdf) return "pdf"
         if (isFont) return "font"
+        if (showingSource) return "source"
         if (isText) return "text"
         return ""
     }
@@ -196,7 +199,7 @@ FocusScope {
             return ""
         return "Page " + (pdfPageIndex + 1) + " of " + pdfPreview.pageCount
     }
-    readonly property bool hasVisualPreview: isImage || (isVideo && videoPreviewAvailable)
+    readonly property bool hasVisualPreview: !showingSource && (isImage || (isVideo && videoPreviewAvailable))
     readonly property string visualSource: {
         if (!hasVisualPreview || filePath === "")
             return ""
@@ -716,7 +719,10 @@ FocusScope {
                 objectName: "quickPreviewZoom"
                 Layout.fillWidth: true
                 scope: root
-                scrollTarget: root.isImage ? visualPreview : root.isPdf ? pdfPreviewImage
+                sourceAvailable: root.sourceAvailable
+                showingSource: root.showingSource
+                onSourceToggled: previewLoader.toggleSource()
+                scrollTarget: (root.isImage && !root.showingSource) ? visualPreview : root.isPdf ? pdfPreviewImage
                     : root.isTable ? previewTable : textPreviewFlick
                 keyboardScrollTarget: (root.isDirectory || root.isArchive) ? directoryPreviewList
                     : root.isFont ? fontPreviewFlick : scrollTarget
@@ -874,7 +880,7 @@ FocusScope {
                             interactive: true
                             boundsMovement: Flickable.StopAtBounds
                             boundsBehavior: Flickable.StopAtBounds
-                            contentWidth: root.isMarkdown ? Math.max(width, markdownGraphics.rightEdge)
+                            contentWidth: root.isRichDocument ? Math.max(width, markdownGraphics.rightEdge)
                                 : Math.max(width, textArea.implicitWidth)
                             contentHeight: Math.max(height, textArea.implicitHeight)
 
@@ -894,8 +900,8 @@ FocusScope {
                                 }
                                 readOnly: true
                                 selectByMouse: true
-                                width: root.isMarkdown ? textPreviewFlick.width : Math.max(implicitWidth, textPreviewFlick.width)
-                                baseUrl: root.markdownBaseUrl
+                                width: root.isRichDocument ? textPreviewFlick.width : Math.max(implicitWidth, textPreviewFlick.width)
+                                baseUrl: root.documentBaseUrl
                                 height: Math.max(implicitHeight, textPreviewFlick.height)
                                 textFormat: textPreview.usesBat && textPreview.html !== ""
                                     ? TextEdit.RichText
@@ -905,19 +911,19 @@ FocusScope {
                                     : (textPreview.isBinary
                                         ? "This file looks binary and cannot be previewed as text."
                                         : (textPreview.usesBat && textPreview.html !== ""
-                                            ? (root.isMarkdown
+                                            ? (root.isRichDocument
                                                 ? markdownGraphics.preparedHtml
                                                 : textPreview.html)
                                             : textPreview.content))
                                 color: Theme.text
-                                wrapMode: root.isMarkdown ? TextEdit.WrapAtWordBoundaryOrAnywhere : TextEdit.NoWrap
-                                font.family: root.isMarkdown ? Qt.application.font.family : "monospace"
+                                wrapMode: root.isRichDocument ? TextEdit.WrapAtWordBoundaryOrAnywhere : TextEdit.NoWrap
+                                font.family: root.isRichDocument ? Qt.application.font.family : "monospace"
                                 font.pointSize: Theme.fontSmall * zoomControls.factor
 
                                 MarkdownGraphics {
                                     id: markdownGraphics
                                     editor: textArea
-                                    html: root.isMarkdown ? root.textPreview.html : ""
+                                    html: root.isRichDocument ? root.textPreview.html : ""
                                     zoom: zoomControls.factor
                                     availableWidth: textPreviewFlick.width - 24
                                 }
@@ -969,7 +975,8 @@ FocusScope {
                             anchors.right: parent.right
                             anchors.bottom: parent.bottom
                             anchors.bottomMargin: 8
-                            visible: root.isText && !root.isTable && textPreview.error === "" && !textPreview.isBinary && !textPreview.usesBat && !root.textHighlightAvailable
+                            visible: root.isText && !root.showingSource && !root.isTable && textPreview.error === ""
+                                && !textPreview.isBinary && !textPreview.usesBat && !root.textHighlightAvailable
                             text: runtimeFeatures.installHint("textHighlight")
                             color: Theme.subtext
                             font.pointSize: Theme.fontSmall

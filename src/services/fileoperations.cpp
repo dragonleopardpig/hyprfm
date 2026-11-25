@@ -395,6 +395,12 @@ QString locationFileName(const QString &path)
     return info.fileName().isEmpty() ? normalized : info.fileName();
 }
 
+QString nameExtension(const QString &name)
+{
+    const qsizetype dot = name.lastIndexOf(u'.');
+    return dot > 0 ? name.mid(dot + 1) : QString();
+}
+
 void appendUniqueLocation(QStringList *paths, const QString &path)
 {
     const QString normalized = normalizeLocation(path);
@@ -1272,6 +1278,56 @@ int FileOperations::moveFiles(const QStringList &sources, const QString &destina
 int FileOperations::moveResolvedItems(const QVariantList &operations)
 {
     return transferResolvedItems(operations, true);
+}
+
+QString FileOperations::fileExtension(const QString &path) const
+{
+    return nameExtension(locationFileName(path));
+}
+
+void FileOperations::requestExtensionMatches(QObject *requester, int requestId, const QString &path)
+{
+    const QString directory = parentLocation(path);
+    const QString extension = fileExtension(path);
+    if (!requester || extension.isEmpty() || directory.isEmpty() || isTrashPath(path))
+        return;
+
+    // List just the clicked file's parent. The confirmation receives a
+    // snapshot, so a subsequent navigation or new file cannot widen it.
+    watchFilesystemTask(requester, MountTable().forPath(directory), [directory, extension]() {
+        GFile *folder = gFileForLocation(directory);
+        GError *error = nullptr;
+        GFileEnumerator *entries = g_file_enumerate_children(folder,
+            G_FILE_ATTRIBUTE_STANDARD_NAME "," G_FILE_ATTRIBUTE_STANDARD_TYPE,
+            G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, nullptr, &error);
+        g_object_unref(folder);
+
+        QStringList paths;
+        if (entries) {
+            while (GFileInfo *entry = g_file_enumerator_next_file(entries, nullptr, &error)) {
+                const auto type = g_file_info_get_file_type(entry);
+                const QString name = QFile::decodeName(g_file_info_get_name(entry));
+                if ((type == G_FILE_TYPE_REGULAR || type == G_FILE_TYPE_SYMBOLIC_LINK)
+                    && nameExtension(name).compare(extension, Qt::CaseInsensitive) == 0) {
+                    paths.append(joinLocation(directory, name));
+                }
+                g_object_unref(entry);
+            }
+            g_object_unref(entries);
+        }
+
+        QVariantMap result{{QStringLiteral("directory"), directory}, {QStringLiteral("extension"), extension}};
+        if (error) {
+            result[QStringLiteral("error")] = QString::fromUtf8(error->message);
+            g_error_free(error);
+        } else {
+            result[QStringLiteral("paths")] = paths;
+        }
+        return result;
+    }, [guard = QPointer<FileOperations>(this), requester, requestId](const QVariantMap &result) {
+        if (guard)
+            emit guard->extensionMatchesReady(requester, requestId, result);
+    });
 }
 
 int FileOperations::trashFiles(const QStringList &paths)

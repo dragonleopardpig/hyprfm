@@ -39,6 +39,7 @@ Item {
     signal renameRequested(string path)
     signal bulkRenameRequested(var paths)
     signal trashRequested(var paths)
+    signal trashExtensionRequested(string path)
     signal restoreRequested(var paths)
     signal deleteRequested(var paths)
     signal openInTerminalRequested(string path)
@@ -808,6 +809,11 @@ Item {
                     icon: "FolderPen"
                 })
                 items.push({ text: "Move to Trash", shortcut: keys("trash"), action: "trash", icon: "Trash", destructive: true })
+                const extension = targetIsDir ? "" : fileOps.fileExtension(targetPath)
+                if (extension !== "") {
+                    items.push({ text: qsTr("Move All .%1 Files to Trash…").arg(extension.toLowerCase()),
+                                 action: "trash_extension", icon: "Trash", destructive: true })
+                }
             }
             items.push({ separator: true })
             items.push({ text: "Properties", shortcut: keys("properties"), action: "properties", icon: "Info" })
@@ -883,6 +889,7 @@ Item {
         case "rename": renameRequested(targetPath); break
         case "bulkrename": bulkRenameRequested(effectivePaths); break
         case "trash": trashRequested(effectivePaths); break
+        case "trash_extension": trashExtensionRequested(targetPath); break
         case "restore": restoreRequested(effectivePaths); break
         case "delete": deleteRequested(effectivePaths); break
         case "paste": pasteRequested(effectiveDir); break
@@ -972,6 +979,7 @@ Item {
                 }
                 Text {
                     text: itemData ? itemData.text : ""
+                    textFormat: Text.PlainText
                     font.pointSize: Theme.fontNormal
                     color: itemData && itemData.destructive ? Theme.error : Theme.text
                     Layout.fillWidth: true
@@ -1032,6 +1040,7 @@ Item {
                 }
                 Text {
                     text: itemData ? itemData.text : ""
+                    textFormat: Text.PlainText
                     font.pointSize: Theme.fontNormal
                     color: Theme.text
                     Layout.fillWidth: true

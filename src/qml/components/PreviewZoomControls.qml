@@ -14,6 +14,9 @@ Item {
     property real factor: 1.0
     readonly property real minimum: 0.25
     readonly property real maximum: 4.0
+    property bool sourceAvailable: false
+    property bool showingSource: false
+    signal sourceToggled()
     signal interacted()
     onFactorChanged: zoomSlider.value = factor
     implicitHeight: Theme.controlSize + 8
@@ -101,6 +104,18 @@ Item {
             font.pointSize: Theme.fontSmall
             horizontalAlignment: Text.AlignRight
             Layout.preferredWidth: 42 * Theme.uiScale
+        }
+        Q.Button {
+            objectName: "previewSourceToggle"
+            visible: root.sourceAvailable
+            text: root.showingSource ? qsTr("Rendered") : qsTr("Source")
+            Accessible.name: root.showingSource ? qsTr("Show rendered preview") : qsTr("Show source")
+            variant: "ghost"
+            size: "small"
+            onClicked: {
+                root.sourceToggled()
+                root.focusPreview()
+            }
         }
         HoverRect {
             objectName: "resetPreviewZoom"

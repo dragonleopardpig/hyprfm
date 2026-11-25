@@ -934,6 +934,110 @@ private slots:
         QCOMPARE(config->fontSize(), 8.0);
     }
 
+    void testPreviewSourceToggle_data()
+    {
+        QTest::addColumn<bool>("quick");
+        QTest::addColumn<QString>("extension");
+        QTest::addColumn<QByteArray>("source");
+        for (const bool quick : {false, true}) {
+            const QString prefix = quick ? "quick-" : "miller-";
+            QTest::newRow(qPrintable(prefix + "md")) << quick << QString("md") << QByteArray("# Heading\n");
+            QTest::newRow(qPrintable(prefix + "html")) << quick << QString("html") << QByteArray("<h1>Heading</h1>");
+            QTest::newRow(qPrintable(prefix + "svg")) << quick << QString("svg")
+                << QByteArray("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"30\" height=\"30\"><rect width=\"30\" height=\"30\"/></svg>");
+            QTest::newRow(qPrintable(prefix + "csv")) << quick << QString("csv") << QByteArray("Name,Value\none,1\n");
+            QTest::newRow(qPrintable(prefix + "tsv")) << quick << QString("tsv") << QByteArray("Name\tValue\none\t1\n");
+            QTest::newRow(qPrintable(prefix + "json")) << quick << QString("json") << QByteArray("{\"a\":1}");
+        }
+    }
+
+    void testPreviewSourceToggle()
+    {
+        QFETCH(bool, quick);
+        QFETCH(QString, extension);
+        QFETCH(QByteArray, source);
+        App app;
+        QFile file(app.home.filePath("preview." + extension));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        QCOMPARE(file.write(source), source.size());
+        file.close();
+
+        QVERIFY(app.load());
+        auto *tab = app.tabModel->activeTab();
+        tab->navigateTo(app.home.path());
+        tab->setViewMode("miller");
+        auto *base = app.engine.rootContext()->contextProperty("fsModel").value<QObject *>();
+        QTRY_COMPARE(base->property("rootPath").toString(), app.home.path());
+        QTRY_VERIFY(!base->property("isLoading").toBool());
+        if (quick) {
+            QVERIFY(QMetaObject::invokeMethod(app.window, "showQuickPreview", Q_ARG(QVariant, file.fileName())));
+        } else {
+            QVERIFY(QMetaObject::invokeMethod(app.window, "focusPathInPane", Q_ARG(QVariant, QString("primary")),
+                                              Q_ARG(QVariant, file.fileName()), Q_ARG(QVariant, true)));
+        }
+        auto *scope = quick ? app.window->property("quickPreview").value<QQuickItem *>() : app.item("millerPreviewColumn");
+        QVERIFY(scope);
+        QTRY_VERIFY(scope->property("sourceAvailable").toBool());
+        auto *toggle = App::findItem(scope, "previewSourceToggle");
+        QVERIFY(toggle);
+        QTRY_VERIFY(toggle->isVisible());
+
+        const char *renderedProperty = extension == "svg" ? "hasVisualPreview"
+            : (extension == "csv" || extension == "tsv") ? "isTable" : "isRichDocument";
+        if (extension != "json")
+            QTRY_VERIFY(scope->property(renderedProperty).toBool());
+
+        QVERIFY(QMetaObject::invokeMethod(toggle, "clicked"));
+        QTRY_VERIFY(scope->property("showingSource").toBool());
+        auto *text = App::findItem(scope, quick ? "quickPreviewText" : "millerPreviewText");
+        QVERIFY(text);
+        QTRY_VERIFY(text->isVisible());
+        QTRY_COMPARE(text->property("text").toString(), QString::fromUtf8(source));
+        QVERIFY(!scope->property(renderedProperty).toBool());
+
+        QVERIFY(QMetaObject::invokeMethod(toggle, "clicked"));
+        QTRY_VERIFY(!scope->property("showingSource").toBool());
+        if (extension != "json")
+            QTRY_VERIFY(scope->property(renderedProperty).toBool());
+    }
+
+    void testExtensionTrashMenuConfirmsTheClickedFolder()
+    {
+        App app;
+        const QString clicked = app.home.filePath("first.png");
+        const QString sibling = app.home.filePath("SECOND.PNG");
+        const QString other = app.home.filePath("keep.txt");
+        for (const QString &path : {clicked, sibling, other}) {
+            QFile file(path);
+            QVERIFY(file.open(QIODevice::WriteOnly));
+        }
+        QVERIFY(app.load());
+        app.tabModel->activeTab()->navigateTo(app.home.path());
+        auto *base = app.engine.rootContext()->contextProperty("fsModel").value<QObject *>();
+        QTRY_COMPARE(base->property("rootPath").toString(), app.home.path());
+        QTRY_VERIFY(!base->property("isLoading").toBool());
+        QVERIFY(QMetaObject::invokeMethod(app.window, "showContextMenuForPane", Q_ARG(QVariant, QString("primary")),
+                                         Q_ARG(QVariant, clicked), Q_ARG(QVariant, false),
+                                         Q_ARG(QVariant, QVariant::fromValue(QPointF(200, 200)))));
+        auto *menu = app.item("contextMenu");
+        QVERIFY(menu);
+        QVERIFY(menuActions(menu).contains("trash_extension"));
+        QVERIFY(QMetaObject::invokeMethod(menu, "executeAction", Q_ARG(QVariant, QString("trash_extension")),
+                                         Q_ARG(QVariant, QVariant()), Q_ARG(QVariant, QVariant())));
+
+        QTRY_VERIFY(app.item("extensionTrashDialog"));
+        auto *dialog = app.item("extensionTrashDialog");
+        QTRY_VERIFY(dialog->isVisible());
+        auto paths = app.window->property("extensionTrashPlan").toMap().value("paths").toStringList();
+        paths.sort();
+        QCOMPARE(paths, (QStringList{sibling, clicked}));
+        QVERIFY(QMetaObject::invokeMethod(dialog, "reject"));
+        QTRY_VERIFY(!dialog->isVisible());
+        QVERIFY(QFile::exists(clicked));
+        QVERIFY(QFile::exists(sibling));
+        QVERIFY(QFile::exists(other));
+    }
+
     void testPreviewKeyboardScrolling_data()
     {
         QTest::addColumn<bool>("quick");

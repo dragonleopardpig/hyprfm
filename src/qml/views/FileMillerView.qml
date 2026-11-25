@@ -1347,6 +1347,7 @@ FocusScope {
                 if (isArchive) return "archive"
                 if (isPdf) return "pdf"
                 if (isFont) return "font"
+                if (showingSource) return "source"
                 if (isText) return "text"
                 return ""
             }
@@ -1366,7 +1367,7 @@ FocusScope {
             readonly property bool pdfPreviewAvailable: previewService ? previewService.pdfPreviewAvailable : false
             readonly property bool videoPreviewAvailable: typeof runtimeFeatures !== "undefined" && runtimeFeatures ? runtimeFeatures.ffmpegAvailable : false
             readonly property bool textHighlightAvailable: typeof runtimeFeatures !== "undefined" && runtimeFeatures ? runtimeFeatures.batAvailable : false
-            readonly property bool hasVisualPreview: isImage || (isVideo && videoPreviewAvailable)
+            readonly property bool hasVisualPreview: !showingSource && (isImage || (isVideo && videoPreviewAvailable))
             readonly property string visualSource: {
                 if (!hasVisualPreview || previewFilePath === "") return ""
                 if (isVideo || isTrashUri || isSvg) return "image://thumbnail/" + encodeURIComponent(previewFilePath)
@@ -1393,9 +1394,13 @@ FocusScope {
                     ? previewFileName.substring(previewFileName.lastIndexOf(".") + 1).toLowerCase() : ""
                 return ["ttf", "otf", "woff", "woff2"].indexOf(ext) >= 0
             }
+            readonly property bool sourceAvailable: !isRemoteUri && !previewIsDir && previewFilePath !== ""
+                && (isSvg || (previewService && previewService.hasSourceView(previewFileName)))
+            readonly property bool showingSource: sourceAvailable && previewLoader.showingSource
             readonly property bool isText: {
+                if (showingSource) return true
                 if (isRemoteUri || previewIsDir || isPdf || isImage || isVideo || isAudio || isArchive || isFont) return false
-                if (_mime.startsWith("text/")) return true
+                if (_mime.startsWith("text/") || sourceAvailable) return true
                 var textMimes = [
                     "application/json", "application/xml", "application/x-yaml",
                     "application/toml", "application/x-shellscript",
@@ -1416,18 +1421,16 @@ FocusScope {
                 return textExt.indexOf(ext) >= 0
             }
 
-            // The service decides what it rendered: md2html failing falls
-            // back to bat, and highlighted source must keep the monospace
-            // no-wrap treatment rather than be laid out as a document on the
-            // strength of an extension alone.
-            readonly property bool isMarkdown: previewColumn.textPreview.markdown === true
+            // Only rendered documents use proportional text and wrap to the pane.
+            readonly property bool isRichDocument: previewColumn.textPreview.markdown === true
+                || previewColumn.textPreview.htmlDocument === true
             readonly property bool isTable: previewColumn.textPreview.table !== undefined
             // A document's own folder, for the relative image paths a README
             // is written against; without it Qt resolves them against the qrc:
             // path this view was loaded from and draws a broken-image glyph
             // for every one. Segments are encoded so spaces and '#' survive.
-            readonly property url markdownBaseUrl: {
-                if (!previewColumn.isMarkdown || previewColumn.previewFilePath === "")
+            readonly property url documentBaseUrl: {
+                if (!previewColumn.isRichDocument || previewColumn.previewFilePath === "")
                     return ""
                 var path = previewColumn.previewFilePath
                 var dir = path.substring(0, path.lastIndexOf("/"))
@@ -1563,7 +1566,10 @@ FocusScope {
                     objectName: "millerPreviewZoom"
                     width: parent.width
                     scope: previewColumn
-                    scrollTarget: previewColumn.isImage ? visualPreview : previewColumn.isPdf ? pdfPreviewImage
+                    sourceAvailable: previewColumn.sourceAvailable
+                    showingSource: previewColumn.showingSource
+                    onSourceToggled: previewLoader.toggleSource()
+                    scrollTarget: (previewColumn.isImage && !previewColumn.showingSource) ? visualPreview : previewColumn.isPdf ? pdfPreviewImage
                         : previewColumn.isTable ? previewTable : textPreviewFlick
                     keyboardScrollTarget: previewColumn.previewIsDir ? previewDirList
                         : previewColumn.isArchive ? archivePreviewList
@@ -1888,7 +1894,7 @@ FocusScope {
                         interactive: true
                         boundsMovement: Flickable.StopAtBounds
                         boundsBehavior: Flickable.StopAtBounds
-                        contentWidth: previewColumn.isMarkdown ? Math.max(markdownWidth, markdownGraphics.rightEdge)
+                        contentWidth: previewColumn.isRichDocument ? Math.max(markdownWidth, markdownGraphics.rightEdge)
                             : Math.max(width, textArea.implicitWidth)
                         contentHeight: Math.max(height, textArea.implicitHeight)
 
@@ -1921,8 +1927,8 @@ FocusScope {
                             }
                             readOnly: true
                             selectByMouse: true
-                            width: previewColumn.isMarkdown ? textPreviewFlick.markdownWidth : Math.max(implicitWidth, textPreviewFlick.width)
-                            baseUrl: previewColumn.markdownBaseUrl
+                            width: previewColumn.isRichDocument ? textPreviewFlick.markdownWidth : Math.max(implicitWidth, textPreviewFlick.width)
+                            baseUrl: previewColumn.documentBaseUrl
                             height: Math.max(implicitHeight, textPreviewFlick.height)
                             textFormat: previewColumn.textPreview.usesBat && previewColumn.textPreview.html !== ""
                                 ? TextEdit.RichText
@@ -1932,19 +1938,19 @@ FocusScope {
                                 : (previewColumn.textPreview.isBinary
                                     ? "This file looks binary and cannot be previewed as text."
                                     : (previewColumn.textPreview.usesBat && previewColumn.textPreview.html !== ""
-                                        ? (previewColumn.isMarkdown
+                                        ? (previewColumn.isRichDocument
                                             ? markdownGraphics.preparedHtml
                                             : previewColumn.textPreview.html)
                                         : previewColumn.textPreview.content))
                             color: Theme.text
-                            wrapMode: previewColumn.isMarkdown ? TextEdit.WrapAtWordBoundaryOrAnywhere : TextEdit.NoWrap
-                            font.family: previewColumn.isMarkdown ? Qt.application.font.family : "monospace"
+                            wrapMode: previewColumn.isRichDocument ? TextEdit.WrapAtWordBoundaryOrAnywhere : TextEdit.NoWrap
+                            font.family: previewColumn.isRichDocument ? Qt.application.font.family : "monospace"
                             font.pointSize: (Theme.fontSmall - 1) * zoomControls.factor
 
                             MarkdownGraphics {
                                 id: markdownGraphics
                                 editor: textArea
-                                html: previewColumn.isMarkdown ? previewColumn.textPreview.html : ""
+                                html: previewColumn.isRichDocument ? previewColumn.textPreview.html : ""
                                 zoom: zoomControls.factor
                                 availableWidth: textPreviewFlick.markdownWidth - 24
                             }
@@ -1988,6 +1994,7 @@ FocusScope {
                         anchors.bottom: parent.bottom
                         anchors.margins: 8
                         visible: textPreviewFlick.visible
+                            && !previewColumn.showingSource
                             && previewColumn.textPreview.error === ""
                             && !previewColumn.textPreview.isBinary
                             && !previewColumn.textPreview.usesBat

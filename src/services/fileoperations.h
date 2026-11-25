@@ -50,6 +50,8 @@ public:
     Q_INVOKABLE int moveFiles(const QStringList &sources, const QString &destination);
     Q_INVOKABLE int moveResolvedItems(const QVariantList &operations);
     Q_INVOKABLE int trashFiles(const QStringList &paths);
+    Q_INVOKABLE QString fileExtension(const QString &path) const;
+    Q_INVOKABLE void requestExtensionMatches(QObject *requester, int requestId, const QString &path);
     Q_INVOKABLE int restoreFromTrash(const QStringList &paths);
     Q_INVOKABLE bool isTrashPath(const QString &path) const;
     Q_INVOKABLE QString trashFilesPathFor(const QString &path) const;
@@ -116,6 +118,7 @@ signals:
     void currentFileChanged();
     void activeTransfersChanged();
     void pathsChanged(const QStringList &paths);
+    void extensionMatchesReady(QObject *requester, int requestId, const QVariantMap &result);
     // An encrypted archive rejected the current password; the UI should ask
     // the user and retry extractArchive() with the password it gets.
     // `retry` is true when a password had already been supplied and was

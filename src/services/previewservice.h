@@ -25,7 +25,7 @@ public:
 
     bool pdfPreviewAvailable() const;
 
-    // Async entry point. `kind` is one of "text", "pdf", "archive",
+    // Async entry point. `kind` is one of "text", "source", "pdf", "archive",
     // "directory", "font", or "" for metadata only. Results arrive on previewReady;
     // anything superseded by a newer request is dropped, never emitted.
     //
@@ -43,7 +43,9 @@ public:
     Q_INVOKABLE void cancelPreview(const QString &requester);
 
     Q_INVOKABLE QVariantMap loadTextPreview(const QString &path, int maxBytes = 131072,
-                                            int maxLines = 400, bool lightTheme = false) const;
+                                            int maxLines = 400, bool lightTheme = false,
+                                            bool sourceOnly = false) const;
+    Q_INVOKABLE bool hasSourceView(const QString &name) const;
     Q_INVOKABLE QVariantMap prepareMarkdownGraphics(QObject *document, const QString &html) const;
     Q_INVOKABLE QVariantList layoutMarkdownGraphics(QObject *document, const QVariantList &images,
                                                    qreal zoom, qreal width) const;

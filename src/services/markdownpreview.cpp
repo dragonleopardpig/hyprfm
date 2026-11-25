@@ -11,6 +11,7 @@
 #include <QTextBlock>
 #include <QTextCursor>
 #include <QTextDocument>
+#include <QTextDocumentFragment>
 #include <QUrl>
 #include <QUuid>
 #include <QXmlStreamReader>
@@ -196,8 +197,10 @@ public:
     {
     }
 
-    QString toHtml(const QString &markdown)
+    QString toHtml(const QString &markdown, bool alreadyHtml = false)
     {
+        if (alreadyHtml)
+            return render(markdown);
         const QString protectedText = protectEquations(markdown);
         const QString html = md4cHtml(protectedText);
         return render(html.isEmpty() ? qtHtml(protectedText) : html);
@@ -330,11 +333,97 @@ private:
     QList<Equation> m_equations;
 };
 
+// QTextEdit can request images and external stylesheets. Admit local and
+// inline images and keep the rest of the document usable offline.
+QString attributeValue(const QRegularExpressionMatch &match)
+{
+    QString value = match.captured(match.lastCapturedIndex());
+    if (!value.contains(u'&'))
+        return value.trimmed();
+    value.replace(u'<', QStringLiteral("&lt;"));
+    value.replace(u'>', QStringLiteral("&gt;"));
+    return QTextDocumentFragment::fromHtml(value).toPlainText().trimmed();
 }
 
-QString renderMarkdownPreview(const QString &markdown, bool lightTheme, const QString &path)
+QString offlineHtml(const QString &html)
 {
-    QString html = MarkdownGraphics(lightTheme).toHtml(markdown);
+    constexpr auto insensitive = QRegularExpression::CaseInsensitiveOption;
+    static const QRegularExpression tokens(QStringLiteral(
+        R"re(<!--.*?-->|<(script|iframe|object|audio|video)\b[^>]*>.*?(?:</\1\s*>|$))re"
+        R"re(|<style\b[^>]*>(.*?)(?:</style\s*>|$)|<(?:"[^"]*"|'[^']*'|[^'">])*>)re"),
+        insensitive | QRegularExpression::DotMatchesEverythingOption);
+    static const QRegularExpression externalTag(
+        QStringLiteral(R"(<\s*(?:link|base|embed)\b)"), insensitive);
+    static const QRegularExpression unsafeCss(
+        QStringLiteral(R"(url\s*\(|@import|\\|/\*)"), insensitive);
+    static const QRegularExpression imageTag(
+        QStringLiteral(R"(^<img\b)"), insensitive);
+    static const QRegularExpression attribute(QStringLiteral(
+        R"re(\s+([^\s=/'"<>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?)re"));
+
+    QString clean;
+    qsizetype offset = 0;
+    auto matches = tokens.globalMatch(html);
+    while (matches.hasNext()) {
+        const auto match = matches.next();
+        clean += QStringView(html).mid(offset, match.capturedStart() - offset);
+        offset = match.capturedEnd();
+        QString tag = match.captured();
+        if (match.hasCaptured(1) || externalTag.match(tag).hasMatch())
+            continue;
+        if (match.hasCaptured(2) && unsafeCss.match(match.captured(2)).hasMatch())
+            continue;
+        if (tag.startsWith(QLatin1String("<!--"))) {
+            clean += tag;
+            continue;
+        }
+
+        if (match.hasCaptured(2) || tag.startsWith(QLatin1String("</"))) {
+            clean += tag;
+            continue;
+        }
+        const bool isImage = imageTag.match(tag).hasMatch();
+        bool imageAllowed = false;
+        QString safeTag;
+        qsizetype attrOffset = 0;
+        auto attrs = attribute.globalMatch(tag);
+        while (attrs.hasNext()) {
+            const auto attr = attrs.next();
+            safeTag += QStringView(tag).mid(attrOffset, attr.capturedStart() - attrOffset);
+            attrOffset = attr.capturedEnd();
+            const QString key = attr.captured(1).toLower();
+            if (key == QLatin1String("background"))
+                continue;
+            const bool hasValue = attr.lastCapturedIndex() > 1;
+            if (key == QLatin1String("style") && hasValue
+                && unsafeCss.match(attributeValue(attr)).hasMatch()) {
+                continue;
+            }
+            if (isImage && key == QLatin1String("src")) {
+                if (imageAllowed || !hasValue)
+                    continue;
+                const QString value = attributeValue(attr);
+                const QUrl url(value);
+                const bool relative = url.scheme().isEmpty() && url.authority().isEmpty()
+                    && !value.startsWith(QLatin1String("//"));
+                const bool local = url.isLocalFile() && url.host().isEmpty();
+                if (!value.isEmpty() && (relative || local
+                    || value.startsWith(QLatin1String("data:image/"), Qt::CaseInsensitive))) {
+                    safeTag += QStringLiteral(" src=\"%1\"").arg(value.toHtmlEscaped());
+                    imageAllowed = true;
+                }
+                continue;
+            }
+            safeTag += attr.captured();
+        }
+        if (!isImage || imageAllowed)
+            clean += safeTag + QStringView(tag).mid(attrOffset);
+    }
+    return clean + QStringView(html).mid(offset);
+}
+
+QString normalizePreviewHtml(QString html, const QString &path)
+{
     html.replace(QStringLiteral("<table>"),
                  QStringLiteral("<table border=\"1\" cellpadding=\"4\" cellspacing=\"0\">"));
 
@@ -347,12 +436,8 @@ QString renderMarkdownPreview(const QString &markdown, bool lightTheme, const QS
     html.replace(checked, QStringLiteral("\\1&#9745;&nbsp;"));
     html.replace(unchecked, QStringLiteral("\\1&#9744;&nbsp;"));
 
-    // QQuickPixmap can fetch remote images. Opening a document preview must
-    // not send a network request, including for raw HTML image tags.
-    static const QRegularExpression remoteImage(
-        QStringLiteral(R"(<img\b[^>]*\bsrc\s*=\s*["']?\s*(?:[a-z][a-z0-9+.-]*:)?//[^>]*>)"),
-        QRegularExpression::CaseInsensitiveOption);
-    html.remove(remoteImage);
+    html = offlineHtml(html);
+
     // Resolve linked SVGs on the preview worker with the same size and
     // self-contained artwork checks as embedded diagrams. Keep the original
     // image link as the fallback for files Qt's rich text already handled.
@@ -382,4 +467,16 @@ QString renderMarkdownPreview(const QString &markdown, bool lightTheme, const QS
         offset = match.capturedEnd(1);
     }
     return withVectors + QStringView(html).mid(offset);
+}
+
+}
+
+QString renderMarkdownPreview(const QString &markdown, bool lightTheme, const QString &path)
+{
+    return normalizePreviewHtml(MarkdownGraphics(lightTheme).toHtml(markdown), path);
+}
+
+QString renderHtmlPreview(const QString &html, const QString &path)
+{
+    return normalizePreviewHtml(MarkdownGraphics(false).toHtml(html, true), path);
 }

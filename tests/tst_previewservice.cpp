@@ -440,6 +440,38 @@ private slots:
 #endif
     }
 
+    void testHtmlPreviewAndLiteralSource()
+    {
+        QTemporaryDir dir;
+        QFile file(dir.filePath("notes.xhtml"));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        const QByteArray html = "<html><head><link rel=stylesheet href=https://blocked.invalid/a.css>"
+                                "<style>@import 'https://blocked.invalid/b.css';</style></head>"
+                                "<body><h1>Heading</h1><script>hidden()</script>"
+                                "<p style='background-image:url(https://blocked.invalid/p.png)'>Text</p>"
+                                "<img src=&#104;ttps://blocked.invalid/c.png>"
+                                "<img src='local.png' src='https://blocked.invalid/d.png'>"
+                                "<table><tr><td>Cell</td></tr></table></body></html>";
+        QCOMPARE(file.write(html), html.size());
+        file.close();
+
+        PreviewService service;
+        QVERIFY(service.hasSourceView(file.fileName()));
+        const auto rendered = service.loadTextPreview(file.fileName());
+        QVERIFY(rendered.value("htmlDocument").toBool());
+        const auto rich = rendered.value("html").toString();
+        QVERIFY(rich.contains("<h1>Heading</h1>"));
+        QVERIFY(rich.contains("local.png"));
+        QVERIFY(rich.contains("border=\"1\""));
+        QVERIFY(!rich.contains("blocked.invalid"));
+        QVERIFY(!rich.contains("hidden()"));
+
+        const auto source = service.loadTextPreview(file.fileName(), 4096, 40, false, true);
+        QCOMPARE(source.value("content").toString(), QString::fromUtf8(html));
+        QVERIFY(source.value("html").toString().isEmpty());
+        QVERIFY(!source.value("htmlDocument").toBool());
+    }
+
     void testMarkdownTablesGetBorders()
     {
         if (!md2htmlAvailable())

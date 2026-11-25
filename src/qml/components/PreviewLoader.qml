@@ -27,8 +27,18 @@ QtObject {
     // actually selected -- otherwise a folder gets previewed as text and a
     // zip as a folder.
     property string path: ""
+    property string sourcePath: ""
+    readonly property bool showingSource: path !== "" && path === sourcePath
 
-    // "text" | "pdf" | "archive" | "directory" | "font" | "" (metadata only)
+    onPathChanged: sourcePath = ""
+
+    function toggleSource() {
+        sourcePath = showingSource ? "" : path
+        previewService.cancelPreview(requester)
+        reload()
+    }
+
+    // "text" | "source" | "pdf" | "archive" | "directory" | "font" | "" (metadata only)
     property string kind: ""
 
     // Only meaningful for encrypted archives. Set by the owner alongside

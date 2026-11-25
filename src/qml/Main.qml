@@ -33,6 +33,8 @@ ApplicationWindow {
         ? secondaryPaneIsRecents
         : primaryPaneIsRecents
     property var deleteConfirmPaths: []
+    property int extensionTrashRequest: 0
+    property var extensionTrashPlan: ({ paths: [], extension: "", directory: "" })
     // A custom action waiting on the "that is a lot of processes" confirmation.
     property var pendingCustomAction: ({ name: "", command: "", paths: [] })
     property string runCandidatePath: ""
@@ -755,6 +757,7 @@ ApplicationWindow {
             && !root.inlineEditActive()
             && !root.isShown(root.conflictDialog)
             && !root.isShown(root.deleteConfirmDialog)
+            && !root.isShown(root.extensionTrashDialog)
             && !root.isShown(root.emptyTrashConfirmDialog)
             && !root.isShown(root.customActionConfirmDialog)
             && !root.isShown(root.terminalPasteConfirmDialog)
@@ -812,7 +815,7 @@ ApplicationWindow {
         const dialogs = [root.renameDialog, root.bulkRenameDialog, root.newFolderDialog,
             root.newFileDialog, root.settingsPanel, root.shortcutsDialog, root.propertiesDialog,
             drivePropertiesDialogLoader.item,
-            root.deleteConfirmDialog, root.conflictDialog, root.emptyTrashConfirmDialog,
+            root.deleteConfirmDialog, root.extensionTrashDialog, root.conflictDialog, root.emptyTrashConfirmDialog,
             root.remoteConnectDialog, root.customActionConfirmDialog, root.terminalPasteConfirmDialog,
             root.runExecutableDialog]
         for (var i = 0; i < dialogs.length; ++i) if (root.isShown(dialogs[i])) return false
@@ -3404,6 +3407,34 @@ ApplicationWindow {
     }
     readonly property var conflictDialog: conflictDialogLoader.item
 
+    function trashPaths(paths) {
+        for (let i = 0; i < paths.length; ++i) {
+            if (fileOps.isRemotePath(paths[i])) {
+                fileOps.trashFiles(paths)
+                return
+            }
+        }
+        undoManager.trashFiles(paths)
+    }
+
+    Loader {
+        id: extensionTrashDialogLoader
+        anchors.fill: parent
+        z: 9998
+        active: false
+        sourceComponent: Component {
+            ConfirmDialog {
+                objectName: "extensionTrashDialog"
+                title: qsTr("Move all .%1 files to Trash?").arg(root.extensionTrashPlan.extension.toLowerCase())
+                message: qsTr("%1 matching files in this folder will be moved to Trash.\n\n%2")
+                    .arg(root.extensionTrashPlan.paths.length).arg(root.extensionTrashPlan.directory)
+                confirmText: qsTr("Move to Trash")
+                onAccepted: root.trashPaths(root.extensionTrashPlan.paths)
+            }
+        }
+    }
+    readonly property var extensionTrashDialog: extensionTrashDialogLoader.item
+
     // ── Permanent Delete Confirmation Dialog ───────────────────────────────
     Loader {
         id: deleteConfirmDialogLoader
@@ -3633,19 +3664,10 @@ ApplicationWindow {
                 onRenameRequested: (path) => root.openRenameDialogForPath(path)
                 onBulkRenameRequested: (paths) => root.openBulkRenameDialog(paths)
 
-                onTrashRequested: (paths) => {
-                    var hasRemotePath = false
-                    for (var i = 0; i < paths.length; ++i) {
-                        if (fileOps.isRemotePath(paths[i])) {
-                            hasRemotePath = true
-                            break
-                        }
-                    }
-
-                    if (hasRemotePath)
-                        fileOps.trashFiles(paths)
-                    else
-                        undoManager.trashFiles(paths)
+                onTrashRequested: paths => root.trashPaths(paths)
+                onTrashExtensionRequested: path => {
+                    ++root.extensionTrashRequest
+                    fileOps.requestExtensionMatches(root, root.extensionTrashRequest, path)
                 }
                 onRestoreRequested: (paths) => fileOps.restoreFromTrash(paths)
                 onEmptyTrashRequested: root.openDialog(emptyTrashConfirmDialogLoader)
@@ -4114,18 +4136,7 @@ ApplicationWindow {
                 deleteConfirmPaths = paths
                 root.openDialog(deleteConfirmDialogLoader)
             } else {
-                var hasRemotePath = false
-                for (var i = 0; i < paths.length; ++i) {
-                    if (fileOps.isRemotePath(paths[i])) {
-                        hasRemotePath = true
-                        break
-                    }
-                }
-
-                if (hasRemotePath)
-                    fileOps.trashFiles(paths)
-                else
-                    undoManager.trashFiles(paths)
+                root.trashPaths(paths)
             }
         }
     }
@@ -4264,6 +4275,7 @@ ApplicationWindow {
                  && !root.isShown(root.newFileDialog)
                  && !root.isShown(drivePropertiesDialogLoader.item)
                  && !root.isShown(root.deleteConfirmDialog)
+                 && !root.isShown(root.extensionTrashDialog)
                  && !root.isShown(root.emptyTrashConfirmDialog)
         onActivated: root.closeSearch()
     }
@@ -5101,6 +5113,21 @@ ApplicationWindow {
             root.appChooserDialog.mimeType = mimeType
             root.appChooserDialog.makeDefault = true
             root.appChooserDialog.open()
+        }
+
+        function onExtensionMatchesReady(requester, requestId, result) {
+            if (requester !== root || requestId !== root.extensionTrashRequest)
+                return
+            if (result.error) {
+                toast.show(result.error, "error")
+                return
+            }
+            if (!result.paths.length) {
+                toast.show(qsTr("No matching files in this folder"))
+                return
+            }
+            root.extensionTrashPlan = result
+            root.openDialog(extensionTrashDialogLoader)
         }
 
         function onTrashUnsupported(paths) {

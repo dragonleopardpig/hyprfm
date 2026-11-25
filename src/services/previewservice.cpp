@@ -316,6 +316,13 @@ bool isMarkdownPath(const QString &path)
         || ext == QLatin1String("mdown") || ext == QLatin1String("mkd");
 }
 
+bool isHtmlPath(const QString &path)
+{
+    const QString ext = QFileInfo(path).suffix().toLower();
+    return ext == QLatin1String("html") || ext == QLatin1String("htm")
+        || ext == QLatin1String("xhtml") || ext == QLatin1String("xht") || ext == QLatin1String("shtml");
+}
+
 // CSV/TSV get a table instead of bat: bat colours every field, and laying the
 // resulting rich text out took seconds on the GUI thread for a big file.
 bool isDelimitedPath(const QString &path)
@@ -555,8 +562,8 @@ QVariantMap PreviewService::buildPreview(const QString &path, const QString &kin
 {
     QVariantMap data;
 
-    if (kind == QLatin1String("text"))
-        data["text"] = loadTextPreview(path, 131072, 400, lightTheme);
+    if (kind == QLatin1String("text") || kind == QLatin1String("source"))
+        data["text"] = loadTextPreview(path, 131072, 400, lightTheme, kind == QLatin1String("source"));
     else if (kind == QLatin1String("pdf"))
         data["pdf"] = loadPdfPreview(path);
     else if (kind == QLatin1String("archive"))
@@ -584,7 +591,14 @@ void PreviewService::refreshSupport()
     emit supportChanged();
 }
 
-QVariantMap PreviewService::loadTextPreview(const QString &path, int maxBytes, int maxLines, bool lightTheme) const
+bool PreviewService::hasSourceView(const QString &name) const
+{
+    return isMarkdownPath(name) || isHtmlPath(name) || isDelimitedPath(name) || isJsonPath(name)
+        || QFileInfo(name).suffix().compare(QLatin1String("svg"), Qt::CaseInsensitive) == 0;
+}
+
+QVariantMap PreviewService::loadTextPreview(const QString &path, int maxBytes, int maxLines,
+                                            bool lightTheme, bool sourceOnly) const
 {
     QVariantMap result;
     bool truncated = false;
@@ -602,13 +616,13 @@ QVariantMap PreviewService::loadTextPreview(const QString &path, int maxBytes, i
     }
 
     const bool binary = looksBinary(data);
-    if (!binary && isJsonPath(path))
+    if (!binary && !sourceOnly && isJsonPath(path))
         data = prettyJson(data, maxLines);
     QString text;
     if (!binary)
         text = decodeText(data);
 
-    if (!binary && isDelimitedPath(path)) {
+    if (!binary && !sourceOnly && isDelimitedPath(path)) {
         const QVariantMap table = delimitedTable(text, path, truncated, 1000);
         result["content"] = QString();
         result["html"] = QString();
@@ -635,23 +649,25 @@ QVariantMap PreviewService::loadTextPreview(const QString &path, int maxBytes, i
     result["error"] = QString();
     result["lineCount"] = lines.size();
 
-    if (!binary && isMarkdownPath(path)) {
-        const QString html = renderMarkdownPreview(plainText, lightTheme, path);
-        if (!html.isEmpty()) {
-            result["html"] = html;
-            result["usesBat"] = true;   // QML routes this into its RichText branch
-            result["markdown"] = true;  // lets QML choose wrap/font for a document
-            return result;
-        }
+    if (sourceOnly || binary)
+        return result;
+
+    const bool markdown = isMarkdownPath(path);
+    const bool htmlDocument = isHtmlPath(path);
+    if (markdown || htmlDocument) {
+        const QString html = markdown ? renderMarkdownPreview(plainText, lightTheme, path)
+                                      : renderHtmlPreview(plainText, path);
+        result["html"] = html;
+        result["usesBat"] = !html.isEmpty(); // RichText, including highlighted source below
+        result["markdown"] = markdown;
+        result["htmlDocument"] = htmlDocument;
+        return result;
     }
 
-    if (!binary) {
-        QString batError;
-        const QByteArray coloredOutput = batPreview(path, data, maxLines, lightTheme, &batError);
-        if (!coloredOutput.isEmpty()) {
-            result["html"] = ansiToHtml(coloredOutput);
-            result["usesBat"] = true;
-        }
+    const QByteArray coloredOutput = batPreview(path, data, maxLines, lightTheme, nullptr);
+    if (!coloredOutput.isEmpty()) {
+        result["html"] = ansiToHtml(coloredOutput);
+        result["usesBat"] = true;
     }
 
     return result;

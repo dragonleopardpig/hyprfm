@@ -1011,6 +1011,34 @@ private slots:
         clipboard->setMimeData(savedMime);
     }
 
+    void testExtensionMatchesOnlySiblingFiles()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        QVERIFY(QDir().mkpath(dir.filePath("folder.png")));
+        for (const QString &name : {"one.png", "TWO.PNG", ".hidden.png", ".png", "not-png.jpg",
+                                    "folder.png/nested.png"}) {
+            QFile file(dir.filePath(name));
+            QVERIFY(file.open(QIODevice::WriteOnly));
+        }
+
+        FileOperations operations;
+        QCOMPARE(operations.fileExtension(dir.filePath(".png")), QString());
+        QCOMPARE(operations.fileExtension(dir.filePath("a.tar.gz")), QString("gz"));
+        QObject requester;
+        QSignalSpy ready(&operations, &FileOperations::extensionMatchesReady);
+        operations.requestExtensionMatches(&requester, 7, dir.filePath("one.png"));
+        QTRY_COMPARE(ready.size(), 1);
+        QCOMPARE(ready.first().at(0).value<QObject *>(), &requester);
+        QCOMPARE(ready.first().at(1).toInt(), 7);
+        const auto result = ready.first().at(2).toMap();
+        QVERIFY(result.value("error").toString().isEmpty());
+        QCOMPARE(result.value("directory").toString(), dir.path());
+        QStringList paths = result.value("paths").toStringList();
+        paths.sort();
+        QCOMPARE(paths, (QStringList{dir.filePath(".hidden.png"), dir.filePath("TWO.PNG"), dir.filePath("one.png")}));
+    }
+
     // --- Trash (requires gio) ---
 
     void testTrashFile()

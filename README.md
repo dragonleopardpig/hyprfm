@@ -76,7 +76,9 @@ HyprFM is a Qt6/QML file manager designed to feel native on Hyprland: lightweigh
 - **Compact view** (`Ctrl+4`): small icons beside filenames, arranged in columns that fill downwards and scroll sideways
 - **Miller columns** (`Ctrl+2`): parent · current · live preview, the macOS Finder favorite
 - **Image and video thumbnails** in detailed and Miller views
-- **Quick preview** (`Space`): full-screen overlay for images, video (poster frame), PDFs, text and rendered Markdown, with metadata sidebar
+- **Quick preview** (`Space`): full-screen overlay for images, video (poster frame), PDFs, text, Markdown and HTML, with a metadata sidebar
+- **Source view** switches between the rendered preview and literal source for Markdown, HTML, SVG, CSV, TSV and JSON in both preview panes.
+- **Trash by extension** offers to move all matching files in the clicked file’s folder to Trash after showing the match count.
 - **Preview zoom**: 25–400% in quick preview and the Miller preview pane, with a slider, `Ctrl+Scroll`, and `Ctrl+0` to reset while the preview has focus. Zoom stays with that preview when switching files; magnified images and PDF pages scroll.
 - **Computer**: open the sidebar shortcut or `computer:///` for drive cards with device icons, used-space bars, and free/total capacity. Double-click or press Enter to open a drive; its menu also offers mount and unmount actions.
 - **Split pane** (`F3`): work in two directories side by side
