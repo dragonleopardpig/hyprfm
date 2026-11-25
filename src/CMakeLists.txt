@@ -132,6 +132,7 @@ list(APPEND hyprfm_qml_module_args
         qml/components/ConfirmDialog.qml
         qml/components/QuillThemeBinding.qml
         qml/components/RemoteConnectDialog.qml
+        qml/components/MarkdownGraphics.qml
         qml/components/PreviewLoader.qml
         qml/components/QuickPreview.qml
         qml/components/PreviewZoomControls.qml
@@ -222,6 +223,10 @@ foreach(icon IN LISTS HYPRFM_STRATA_QML_OVERRIDES)
     list(APPEND hyprfm_qml_module_args "qml/strataicons/${icon}")
 endforeach()
 list(APPEND hyprfm_qml_module_args qml/components/StrataIcon.qml qml/strataicons/IconMapping.js)
+find_package(Qt6QuickVectorImage CONFIG QUIET)
+if(TARGET Qt6::QuickVectorImage)
+    list(APPEND hyprfm_qml_module_args qml/components/MarkdownVectorImage.qml)
+endif()
 qt_add_qml_module(hyprfm ${hyprfm_qml_module_args})
 
 # The app logo, for the About page; the installed copy is only in the icon

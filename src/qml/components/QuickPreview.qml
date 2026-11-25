@@ -160,16 +160,6 @@ FocusScope {
         var dir = root.filePath.substring(0, root.filePath.lastIndexOf("/"))
         return "file://" + dir.split("/").map(encodeURIComponent).join("/") + "/"
     }
-    // Qt draws a rich-text image at its native size, so the screenshots a
-    // README points at (2500 px wide is normal) run far outside the pane and
-    // push the text off with them. A pixel max-width shrinks anything wider
-    // than the pane and scales the height with it, while a badge or a logo
-    // that already fits is left at the size it was drawn for.
-    function fitMarkdownImages(html, limit) {
-        return html.replace(/<img\b/g,
-                            '<img style="max-width:' + Math.max(64, Math.floor(limit)) + 'px"')
-    }
-
     // Which loader the worker thread should run. Mirrors the is* properties
     // below; "" means metadata only (images, video, audio, fonts).
     readonly property string previewKind: {
@@ -884,7 +874,8 @@ FocusScope {
                             interactive: true
                             boundsMovement: Flickable.StopAtBounds
                             boundsBehavior: Flickable.StopAtBounds
-                            contentWidth: root.isMarkdown ? width : Math.max(width, textArea.implicitWidth)
+                            contentWidth: root.isMarkdown ? Math.max(width, markdownGraphics.rightEdge)
+                                : Math.max(width, textArea.implicitWidth)
                             contentHeight: Math.max(height, textArea.implicitHeight)
 
                             TextEdit {
@@ -915,14 +906,21 @@ FocusScope {
                                         ? "This file looks binary and cannot be previewed as text."
                                         : (textPreview.usesBat && textPreview.html !== ""
                                             ? (root.isMarkdown
-                                                ? root.fitMarkdownImages(textPreview.html,
-                                                                         textPreviewFlick.width - 24)
+                                                ? markdownGraphics.preparedHtml
                                                 : textPreview.html)
                                             : textPreview.content))
                                 color: Theme.text
                                 wrapMode: root.isMarkdown ? TextEdit.WrapAtWordBoundaryOrAnywhere : TextEdit.NoWrap
                                 font.family: root.isMarkdown ? Qt.application.font.family : "monospace"
                                 font.pointSize: Theme.fontSmall * zoomControls.factor
+
+                                MarkdownGraphics {
+                                    id: markdownGraphics
+                                    editor: textArea
+                                    html: root.isMarkdown ? root.textPreview.html : ""
+                                    zoom: zoomControls.factor
+                                    availableWidth: textPreviewFlick.width - 24
+                                }
 
                                 onCursorRectangleChanged: {
                                     var r = cursorRectangle
