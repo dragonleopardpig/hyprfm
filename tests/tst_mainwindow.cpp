@@ -992,7 +992,9 @@ private slots:
         auto *text = App::findItem(scope, quick ? "quickPreviewText" : "millerPreviewText");
         QVERIFY(text);
         QTRY_VERIFY(text->isVisible());
-        QTRY_COMPARE(text->property("text").toString(), QString::fromUtf8(source));
+        auto *document = text->property("textDocument").value<QQuickTextDocument *>();
+        QVERIFY(document);
+        QTRY_COMPARE(document->textDocument()->toPlainText(), QString::fromUtf8(source));
         QVERIFY(!scope->property(renderedProperty).toBool());
 
         QVERIFY(QMetaObject::invokeMethod(toggle, "clicked"));

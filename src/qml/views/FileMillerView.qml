@@ -1570,7 +1570,7 @@ FocusScope {
                     showingSource: previewColumn.showingSource
                     onSourceToggled: previewLoader.toggleSource()
                     scrollTarget: (previewColumn.isImage && !previewColumn.showingSource) ? visualPreview : previewColumn.isPdf ? pdfPreviewImage
-                        : previewColumn.isTable ? previewTable : textPreviewFlick
+                        : htmlPreview.ready ? null : previewColumn.isTable ? previewTable : textPreviewFlick
                     keyboardScrollTarget: previewColumn.previewIsDir ? previewDirList
                         : previewColumn.isArchive ? archivePreviewList
                         : previewColumn.isFont ? millerFontFlick : scrollTarget
@@ -1883,13 +1883,23 @@ FocusScope {
                         }
                     }
 
+                    HtmlPreviewLoader {
+                        id: htmlPreview
+                        anchors.fill: parent
+                        anchors.margins: 6
+                        html: !previewColumn.showingSource && previewColumn.textPreview.htmlDocument
+                            ? previewColumn.textPreview.content : ""
+                        baseUrl: previewColumn.documentBaseUrl
+                        zoom: zoomControls.factor
+                    }
+
                     // Text preview
                     Flickable {
                         id: textPreviewFlick
                         anchors.fill: parent
                         anchors.margins: 6
                         visible: previewColumn.isText && !previewColumn.isTable && !previewColumn.hasVisualPreview
-                            && !previewColumn.previewIsDir && !previewColumn.isPdf && !previewColumn.isArchive
+                            && !previewColumn.previewIsDir && !previewColumn.isPdf && !previewColumn.isArchive && !htmlPreview.ready
                         clip: true
                         interactive: true
                         boundsMovement: Flickable.StopAtBounds
@@ -1994,7 +2004,6 @@ FocusScope {
                         anchors.bottom: parent.bottom
                         anchors.margins: 8
                         visible: textPreviewFlick.visible
-                            && !previewColumn.showingSource
                             && previewColumn.textPreview.error === ""
                             && !previewColumn.textPreview.isBinary
                             && !previewColumn.textPreview.usesBat

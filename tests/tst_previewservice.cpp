@@ -13,6 +13,7 @@
 #include <QStandardPaths>
 #include <QSvgRenderer>
 #include <QTemporaryDir>
+#include <QTextDocument>
 #include <QUuid>
 
 #include "services/previewservice.h"
@@ -468,8 +469,45 @@ private slots:
 
         const auto source = service.loadTextPreview(file.fileName(), 4096, 40, false, true);
         QCOMPARE(source.value("content").toString(), QString::fromUtf8(html));
-        QVERIFY(source.value("html").toString().isEmpty());
         QVERIFY(!source.value("htmlDocument").toBool());
+    }
+
+    void testLiteralSourceHighlighting_data()
+    {
+        QTest::addColumn<QString>("extension");
+        QTest::addColumn<QByteArray>("source");
+        QTest::newRow("markdown") << QString("md") << QByteArray("# Heading\n\n`code`\n");
+        QTest::newRow("html") << QString("html") << QByteArray("<h1>Heading</h1>");
+        QTest::newRow("xht") << QString("XHT") << QByteArray("<h1>Heading</h1>");
+        QTest::newRow("svg") << QString("svg") << QByteArray("<svg width=\"30\"></svg>\n");
+        QTest::newRow("json") << QString("json") << QByteArray("{ \"value\": 42 }\n");
+        QTest::newRow("csv") << QString("csv") << QByteArray("Name,Value\n\"a,b\",42\n");
+        QTest::newRow("tsv") << QString("tsv") << QByteArray("Name\tValue\n\"a,b\"\t42\n");
+    }
+
+    void testLiteralSourceHighlighting()
+    {
+        if (!batAvailable())
+            QSKIP("bat not installed");
+        QFETCH(QString, extension);
+        QFETCH(QByteArray, source);
+        QTemporaryDir dir;
+        QFile file(dir.filePath("example." + extension));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        QCOMPARE(file.write(source), source.size());
+        file.close();
+
+        PreviewService service;
+        for (const bool lightTheme : {false, true}) {
+            const auto preview = service.loadTextPreview(file.fileName(), 4096, 40, lightTheme, true);
+            const QString highlighted = preview.value("html").toString();
+            QVERIFY(preview.value("usesBat").toBool());
+            QVERIFY(highlighted.contains("<span style=\"color:"));
+            QCOMPARE(preview.value("content").toString(), QString::fromUtf8(source));
+            QTextDocument document;
+            document.setHtml(highlighted);
+            QCOMPARE(document.toPlainText(), QString::fromUtf8(source));
+        }
     }
 
     void testMarkdownTablesGetBorders()

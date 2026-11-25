@@ -723,7 +723,7 @@ FocusScope {
                 showingSource: root.showingSource
                 onSourceToggled: previewLoader.toggleSource()
                 scrollTarget: (root.isImage && !root.showingSource) ? visualPreview : root.isPdf ? pdfPreviewImage
-                    : root.isTable ? previewTable : textPreviewFlick
+                    : htmlPreview.ready ? null : root.isTable ? previewTable : textPreviewFlick
                 keyboardScrollTarget: (root.isDirectory || root.isArchive) ? directoryPreviewList
                     : root.isFont ? fontPreviewFlick : scrollTarget
                 pageWheel: root.isPdf ? root.handlePdfWheel : null
@@ -872,10 +872,18 @@ FocusScope {
                             }
                         }
 
+                        HtmlPreviewLoader {
+                            id: htmlPreview
+                            anchors.fill: parent
+                            html: !root.showingSource && root.textPreview.htmlDocument ? root.textPreview.content : ""
+                            baseUrl: root.documentBaseUrl
+                            zoom: zoomControls.factor
+                        }
+
                         Flickable {
                             id: textPreviewFlick
                             anchors.fill: parent
-                            visible: root.isText && !root.isTable && !root.hasVisualPreview && !root.isPdf
+                            visible: root.isText && !root.isTable && !root.hasVisualPreview && !root.isPdf && !htmlPreview.ready
                             clip: true
                             interactive: true
                             boundsMovement: Flickable.StopAtBounds
@@ -975,7 +983,7 @@ FocusScope {
                             anchors.right: parent.right
                             anchors.bottom: parent.bottom
                             anchors.bottomMargin: 8
-                            visible: root.isText && !root.showingSource && !root.isTable && textPreview.error === ""
+                            visible: textPreviewFlick.visible && textPreview.error === ""
                                 && !textPreview.isBinary && !textPreview.usesBat && !root.textHighlightAvailable
                             text: runtimeFeatures.installHint("textHighlight")
                             color: Theme.subtext

@@ -12,6 +12,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 DBus Svg Network Concurrent)
+find_package(Qt6 QUIET OPTIONAL_COMPONENTS WebEngineQuick)
 find_package(KF6WindowSystem QUIET)
 find_package(JKQTPlotter6 CONFIG QUIET)
 

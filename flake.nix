@@ -120,6 +120,7 @@
             kdePackages.qtbase
             kdePackages.qtdeclarative
             kdePackages.qtsvg
+            kdePackages.qtwebengine
             kdePackages.qtwayland
             kdePackages.kwindowsystem
             glib

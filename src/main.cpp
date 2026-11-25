@@ -17,6 +17,12 @@
 #include <QJsonArray>
 #include <QFile>
 #include <QQuickWindow>
+#ifdef HYPRFM_WEBENGINE
+#include <QQuickWebEngineProfile>
+#include <QtWebEngineQuick>
+#include <QWebEngineUrlRequestInfo>
+#include <QWebEngineUrlRequestInterceptor>
+#endif
 #include <QSaveFile>
 #include <QTimer>
 #include <QFontDatabase>
@@ -85,6 +91,35 @@
 Q_IMPORT_QML_PLUGIN(QuillPlugin)
 
 namespace {
+
+#ifdef HYPRFM_WEBENGINE
+class HtmlPreviewRequests : public QWebEngineUrlRequestInterceptor
+{
+public:
+    using QWebEngineUrlRequestInterceptor::QWebEngineUrlRequestInterceptor;
+
+    void interceptRequest(QWebEngineUrlRequestInfo &info) override
+    {
+        using Request = QWebEngineUrlRequestInfo;
+        const QUrl url = info.requestUrl();
+        const auto type = info.resourceType();
+        const QUrl base = info.firstPartyUrl();
+        const bool asset = type == Request::ResourceTypeImage
+            || type == Request::ResourceTypeStylesheet || type == Request::ResourceTypeFontResource;
+        if (url.scheme() == QLatin1String("data") && (type == Request::ResourceTypeMainFrame || asset))
+            return;
+
+        // The base URL passed to loadHtml is the directory of the previewed
+        // file. Allow its relative image, stylesheet and font references.
+        if (asset && url.isLocalFile() && url.host().isEmpty()
+            && base.isLocalFile() && base.host().isEmpty()
+            && base.path().endsWith(u'/') && QDir::cleanPath(url.path()).startsWith(base.path()))
+            return;
+
+        info.block(true);
+    }
+};
+#endif
 
 // Renderer choice: Vulkan when the machine has a hardware Vulkan device,
 // OpenGL otherwise. On Mesa the OpenGL driver maps libLLVM for its shader
@@ -664,6 +699,9 @@ int main(int argc, char *argv[])
     // while this is the only thread.
     RendererChoice renderer;
 
+#ifdef HYPRFM_WEBENGINE
+    QtWebEngineQuick::initialize();
+#endif
     QGuiApplication app(argc, argv);
     app.setApplicationName("HyprFM");
     app.setApplicationVersion(QStringLiteral(HYPRFM_VERSION));
@@ -1006,6 +1044,16 @@ int main(int argc, char *argv[])
     shared->setContextProperty("computerModel", computerModel);
     shared->setContextProperty("recentFiles", recentFiles);
     shared->setContextProperty("previewService", previewService);
+#ifdef HYPRFM_WEBENGINE
+    qmlRegisterSingletonType<QQuickWebEngineProfile>(
+        "HyprFM.Html", 1, 0, "OfflineProfile",
+        [](QQmlEngine *, QJSEngine *) -> QObject * {
+            auto *profile = new QQuickWebEngineProfile;
+            profile->setUrlRequestInterceptor(new HtmlPreviewRequests(profile));
+            return profile;
+        });
+    shared->setContextProperty("hyprfmHtmlWebEngine", true);
+#endif
     shared->setContextProperty("metadataExtractor", metadataExtractor);
     shared->setContextProperty("diskUsageService", diskUsageService);
     shared->setContextProperty("remoteAccessService", remoteAccessService);

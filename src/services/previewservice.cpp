@@ -179,7 +179,7 @@ void applyAnsiCode(AnsiState &state, const QList<int> &codes)
 
 } // namespace
 
-QString PreviewService::ansiToHtml(const QByteArray &ansiText)
+QString PreviewService::ansiToHtml(const QByteArray &ansiText, bool literalSource)
 {
     QString html = QStringLiteral("<pre style=\"margin:0;font-family:monospace;white-space:pre;\">");
     AnsiState state;
@@ -231,9 +231,15 @@ QString PreviewService::ansiToHtml(const QByteArray &ansiText)
             ++index;
             continue;
         }
-        QString chunk = QString::fromUtf8(ansiText.mid(index, nextEscape - index));
-        chunk.replace(QStringLiteral("\t"), QStringLiteral("    "));
-        html += chunk.toHtmlEscaped();
+        QString chunk = QString::fromUtf8(ansiText.mid(index, nextEscape - index)).toHtmlEscaped();
+        if (literalSource) {
+            // Qt's HTML parser trims the first and last newline inside <pre>.
+            // Explicit breaks preserve them and allow tabs to stay selectable.
+            chunk.replace(u'\n', QStringLiteral("<br>"));
+        } else {
+            chunk.replace(u'\t', QStringLiteral("    "));
+        }
+        html += chunk;
         index = nextEscape;
     }
 
@@ -266,11 +272,9 @@ QByteArray readBoundedOutput(QProcess &proc, qint64 readLimit)
 
 // bat highlights `data` (already capped by the caller) rather than the file
 // itself: one 300 MB line would otherwise come back as 300 MB of HTML.
-QByteArray batPreview(const QString &path, const QByteArray &data, int maxLines, bool lightTheme, QString *error)
+QByteArray batPreview(const QString &path, const QByteArray &data, int maxLines,
+                      bool lightTheme, bool literalSource)
 {
-    if (error)
-        error->clear();
-
     const QString executable = batExecutable();
     if (executable.isEmpty())
         return {};
@@ -286,6 +290,11 @@ QByteArray batPreview(const QString &path, const QByteArray &data, int maxLines,
     args.append(lightTheme ? QStringLiteral("--theme=GitHub") : QStringLiteral("--theme=Monokai Extended"));
     if (maxLines > 0)
         args.append(QStringLiteral("--line-range=:%1").arg(maxLines));
+    if (literalSource) {
+        args.append(QStringLiteral("--tabs=0"));
+        if (QFileInfo(path).suffix().compare(QLatin1String("xht"), Qt::CaseInsensitive) == 0)
+            args.append(QStringLiteral("--language=HTML"));
+    }
     args.append(QStringLiteral("--file-name"));
     args.append(QUrl(path).fileName().isEmpty() ? path : QUrl(path).fileName());
 
@@ -293,16 +302,8 @@ QByteArray batPreview(const QString &path, const QByteArray &data, int maxLines,
     proc.start(executable, args);
     proc.write(data);
     proc.closeWriteChannel();
-    if (!proc.waitForFinished(10000)) {
-        if (error)
-            *error = QStringLiteral("bat preview timed out");
+    if (!proc.waitForFinished(10000) || proc.exitCode() != 0)
         return {};
-    }
-    if (proc.exitCode() != 0) {
-        if (error)
-            *error = QString::fromUtf8(proc.readAllStandardError()).trimmed();
-        return {};
-    }
 
     return proc.readAllStandardOutput();
 }
@@ -562,9 +563,11 @@ QVariantMap PreviewService::buildPreview(const QString &path, const QString &kin
 {
     QVariantMap data;
 
-    if (kind == QLatin1String("text") || kind == QLatin1String("source"))
-        data["text"] = loadTextPreview(path, 131072, 400, lightTheme, kind == QLatin1String("source"));
-    else if (kind == QLatin1String("pdf"))
+    if (kind == QLatin1String("text") || kind == QLatin1String("source")) {
+        const bool sourceOnly = kind == QLatin1String("source");
+        const int maxLines = !sourceOnly && isHtmlPath(path) ? 0 : 400;
+        data["text"] = loadTextPreview(path, 131072, maxLines, lightTheme, sourceOnly);
+    } else if (kind == QLatin1String("pdf"))
         data["pdf"] = loadPdfPreview(path);
     else if (kind == QLatin1String("archive"))
         data["archive"] = loadArchivePreview(path, 200, password);
@@ -649,11 +652,11 @@ QVariantMap PreviewService::loadTextPreview(const QString &path, int maxBytes, i
     result["error"] = QString();
     result["lineCount"] = lines.size();
 
-    if (sourceOnly || binary)
+    if (binary)
         return result;
 
-    const bool markdown = isMarkdownPath(path);
-    const bool htmlDocument = isHtmlPath(path);
+    const bool markdown = !sourceOnly && isMarkdownPath(path);
+    const bool htmlDocument = !sourceOnly && isHtmlPath(path);
     if (markdown || htmlDocument) {
         const QString html = markdown ? renderMarkdownPreview(plainText, lightTheme, path)
                                       : renderHtmlPreview(plainText, path);
@@ -664,9 +667,10 @@ QVariantMap PreviewService::loadTextPreview(const QString &path, int maxBytes, i
         return result;
     }
 
-    const QByteArray coloredOutput = batPreview(path, data, maxLines, lightTheme, nullptr);
+    const QByteArray coloredOutput = batPreview(path, sourceOnly ? plainText.toUtf8() : data,
+                                               maxLines, lightTheme, sourceOnly);
     if (!coloredOutput.isEmpty()) {
-        result["html"] = ansiToHtml(coloredOutput);
+        result["html"] = ansiToHtml(coloredOutput, sourceOnly);
         result["usesBat"] = true;
     }
 

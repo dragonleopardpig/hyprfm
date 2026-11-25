@@ -37,6 +37,13 @@ add_library(hyprfm_icons OBJECT icons/strata.qrc)
 target_link_libraries(hyprfm_icons PRIVATE Qt6::Core)
 qt_add_executable(hyprfm ${HYPRFM_SOURCES})
 target_link_libraries(hyprfm PRIVATE hyprfm_icons)
+if(TARGET Qt6::WebEngineQuick)
+    target_link_libraries(hyprfm PRIVATE Qt6::WebEngineQuick Qt6::WebEngineCore)
+    target_compile_definitions(hyprfm PRIVATE HYPRFM_WEBENGINE)
+    qt_add_resources(hyprfm "html_preview"
+        PREFIX "/"
+        FILES qml/components/HtmlPreview.qml)
+endif()
 install(DIRECTORY icons/strata/licenses/ DESTINATION share/hyprfm/licenses/strata)
 
 if(HYPRFM_TERMINAL)
@@ -133,6 +140,7 @@ list(APPEND hyprfm_qml_module_args
         qml/components/QuillThemeBinding.qml
         qml/components/RemoteConnectDialog.qml
         qml/components/MarkdownGraphics.qml
+        qml/components/HtmlPreviewLoader.qml
         qml/components/PreviewLoader.qml
         qml/components/QuickPreview.qml
         qml/components/PreviewZoomControls.qml

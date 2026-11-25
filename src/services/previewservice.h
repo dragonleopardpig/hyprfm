@@ -57,7 +57,7 @@ public:
 
     // Converts bat's ANSI-coloured output to escaped HTML. Public so it can
     // be unit-tested against hostile byte sequences.
-    static QString ansiToHtml(const QByteArray &ansiText);
+    static QString ansiToHtml(const QByteArray &ansiText, bool literalSource = false);
 
 public slots:
     // Re-check availability of external tools (pdftoppm/pdfinfo). Called

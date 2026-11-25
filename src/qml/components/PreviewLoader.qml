@@ -17,7 +17,7 @@ QtObject {
     // requester, so the two panels never cancel one another.
     property string requester: String(loader)
     property bool lightTheme: Theme.base.r * 0.2126 + Theme.base.g * 0.7152 + Theme.base.b * 0.0722 > 0.5
-    onLightThemeChanged: if (path !== "" && kind === "text") reload()
+    onLightThemeChanged: if (path !== "" && (kind === "text" || kind === "source")) reload()
 
     // Bound by the owner. Deliberately read at debounce-fire time rather
     // than inside reload(): both derive from the owner's fileProps, which is
