@@ -896,7 +896,10 @@ FocusScope {
                                 id: textArea
                                 objectName: "quickPreviewText"
                                 Keys.onShortcutOverride: event => {
-                                    if (config.keyEventMatches("focus_previous_column", event.key, event.modifiers)) event.accepted = true
+                                    if (config.keyEventMatches("focus_previous_column", event.key, event.modifiers)
+                                        || event.matches(StandardKey.Copy)
+                                        || event.matches(StandardKey.SelectAll))
+                                        event.accepted = true
                                 }
                                 Keys.onPressed: event => {
                                     if (config.keyEventMatches("focus_previous_column", event.key, event.modifiers)) {
@@ -924,6 +927,8 @@ FocusScope {
                                                 : textPreview.html)
                                             : textPreview.content))
                                 color: Theme.text
+                                selectionColor: Theme.accent
+                                selectedTextColor: Theme.base
                                 wrapMode: root.isRichDocument ? TextEdit.WrapAtWordBoundaryOrAnywhere : TextEdit.NoWrap
                                 font.family: root.isRichDocument ? Qt.application.font.family : "monospace"
                                 font.pointSize: Theme.fontSmall * zoomControls.factor

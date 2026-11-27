@@ -1556,6 +1556,11 @@ Window {
                         selectionColor: Theme.accent
                         selectedTextColor: Theme.base
                         font.pointSize: Theme.fontNormal
+
+                        Keys.onShortcutOverride: event => {
+                            if (event.matches(StandardKey.Copy) || event.matches(StandardKey.SelectAll))
+                                event.accepted = true
+                        }
                     }
                 }
             }

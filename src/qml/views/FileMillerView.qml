@@ -1891,7 +1891,10 @@ FocusScope {
                             id: textArea
                             objectName: "millerPreviewText"
                             Keys.onShortcutOverride: event => {
-                                if (config.keyEventMatches("focus_previous_column", event.key, event.modifiers)) event.accepted = true
+                                if (config.keyEventMatches("focus_previous_column", event.key, event.modifiers)
+                                    || event.matches(StandardKey.Copy)
+                                    || event.matches(StandardKey.SelectAll))
+                                    event.accepted = true
                             }
                             Keys.onPressed: event => {
                                 if (config.keyEventMatches("focus_previous_column", event.key, event.modifiers)) {
@@ -1919,6 +1922,8 @@ FocusScope {
                                             : previewColumn.textPreview.html)
                                         : previewColumn.textPreview.content))
                             color: Theme.text
+                            selectionColor: Theme.accent
+                            selectedTextColor: Theme.base
                             wrapMode: previewColumn.isRichDocument ? TextEdit.WrapAtWordBoundaryOrAnywhere : TextEdit.NoWrap
                             font.family: previewColumn.isRichDocument ? Qt.application.font.family : "monospace"
                             font.pointSize: (Theme.fontSmall - 1) * zoomControls.factor

@@ -38,4 +38,18 @@ WebEngineView {
     onRenderProcessTerminated: failed = true
     onContextMenuRequested: request => { request.accepted = true }
     onFileDialogRequested: request => { request.accepted = true }
+
+    Keys.onShortcutOverride: event => {
+        if (event.matches(StandardKey.Copy) || event.matches(StandardKey.SelectAll))
+            event.accepted = true
+    }
+    Keys.onPressed: event => {
+        if (event.matches(StandardKey.Copy)) {
+            triggerWebAction(WebEngineView.Copy)
+            event.accepted = true
+        } else if (event.matches(StandardKey.SelectAll)) {
+            triggerWebAction(WebEngineView.SelectAll)
+            event.accepted = true
+        }
+    }
 }

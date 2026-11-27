@@ -594,6 +594,126 @@ private slots:
         }
     }
 
+    void testPreviewCopyAndSelectAll_data()
+    {
+        QTest::addColumn<bool>("quick");
+        QTest::addColumn<QString>("extension");
+        for (bool quick : {true, false})
+            for (const QString &ext : {QString("md"), QString("txt"), QString("rs")})
+                QTest::newRow(qPrintable((quick ? "quick-" : "miller-") + ext)) << quick << ext;
+    }
+
+    void testPreviewCopyAndSelectAll()
+    {
+        QFETCH(bool, quick);
+        QFETCH(QString, extension);
+        App app;
+        const QString fileName = QStringLiteral("sample.") + extension;
+        const QString path = app.home.filePath(fileName);
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        if (extension == "md")
+            file.write("# Heading\n\nAlpha Beta Gamma\nSecond line\n");
+        else if (extension == "txt")
+            file.write("Alpha Beta Gamma\nSecond line\n");
+        else
+            file.write("fn main() { /* Alpha Beta Gamma */ }\n");
+        file.close();
+
+        QVERIFY(app.load());
+        auto *tab = app.tabModel->activeTab();
+        tab->navigateTo(app.home.path());
+        tab->setViewMode("miller");
+        auto *model = app.engine.rootContext()->contextProperty("fsModel").value<QObject *>();
+        QTRY_COMPARE(model->property("rootPath").toString(), app.home.path());
+        QTRY_VERIFY(!model->property("isLoading").toBool());
+        QVERIFY(QMetaObject::invokeMethod(app.window, "focusPathInPane", Q_ARG(QVariant, QString("primary")),
+                                          Q_ARG(QVariant, path), Q_ARG(QVariant, true)));
+        QTRY_COMPARE(app.window->property("currentSelectedCount").toInt(), 1);
+
+        // Normal file-copy keeps working while the file list has focus.
+        QGuiApplication::clipboard()->clear();
+        QTest::keyClick(app.window, Qt::Key_C, Qt::ControlModifier);
+        QTRY_VERIFY(QGuiApplication::clipboard()->text().startsWith(QStringLiteral("file://")));
+        QVERIFY(QGuiApplication::clipboard()->text().contains(fileName));
+
+        if (quick)
+            QVERIFY(QMetaObject::invokeMethod(app.window, "showQuickPreview", Q_ARG(QVariant, path)));
+        QTRY_VERIFY(app.item(quick ? "quickPreviewText" : "millerPreviewText"));
+        auto *text = app.item(quick ? "quickPreviewText" : "millerPreviewText");
+        QTRY_VERIFY(text->isVisible());
+        auto *document = text->property("textDocument").value<QQuickTextDocument *>();
+        QVERIFY(document && document->textDocument());
+        QTRY_VERIFY(document->textDocument()->toPlainText().contains(QStringLiteral("Alpha Beta Gamma")));
+
+        if (quick) {
+            auto *config = qobject_cast<ConfigManager *>(
+                app.engine.rootContext()->contextProperty("config").value<QObject *>());
+            QVERIFY(config);
+            QTest::qWait(config->animDurationSlow());
+        }
+
+        const QString plain = document->textDocument()->toPlainText();
+        const int phraseStart = plain.indexOf(QStringLiteral("Alpha Beta Gamma"));
+        QVERIFY(phraseStart >= 0);
+        const int phraseEnd = phraseStart + QStringLiteral("Alpha Beta Gamma").size();
+        QRectF startRect;
+        QRectF endRect;
+        QVERIFY(QMetaObject::invokeMethod(text, "positionToRectangle",
+                                          Q_RETURN_ARG(QRectF, startRect), Q_ARG(int, phraseStart)));
+        QVERIFY(QMetaObject::invokeMethod(text, "positionToRectangle",
+                                          Q_RETURN_ARG(QRectF, endRect), Q_ARG(int, phraseEnd)));
+        const QPoint start = text->mapToScene(QPointF(startRect.left() + 1, startRect.center().y())).toPoint();
+        const QPoint end = text->mapToScene(QPointF(endRect.left() + 1, endRect.center().y())).toPoint();
+
+        QTest::mousePress(app.window, Qt::LeftButton, Qt::NoModifier, start);
+        QTest::mouseMove(app.window, QPoint((start.x() + end.x()) / 2, end.y()));
+        QTest::mouseMove(app.window, end);
+        QTest::mouseRelease(app.window, Qt::LeftButton, Qt::NoModifier, end);
+
+        QVERIFY(text->hasActiveFocus());
+        const QString selected = text->property("selectedText").toString();
+        QVERIFY(!selected.isEmpty());
+        QVERIFY(selected.contains(QStringLiteral("Alpha")));
+
+        QGuiApplication::clipboard()->clear();
+        QTest::keyClick(app.window, Qt::Key_C, Qt::ControlModifier);
+        const QString expectedSelection = QString(selected).replace(QChar(0x2029), QLatin1Char('\n'));
+        QTRY_COMPARE(QGuiApplication::clipboard()->text(), expectedSelection);
+        QVERIFY(!QGuiApplication::clipboard()->text().startsWith(QStringLiteral("file://")));
+
+        QGuiApplication::clipboard()->clear();
+        QTest::keyClick(app.window, Qt::Key_A, Qt::ControlModifier);
+        QTest::keyClick(app.window, Qt::Key_C, Qt::ControlModifier);
+        QTRY_VERIFY(QGuiApplication::clipboard()->text().contains(QStringLiteral("Alpha Beta Gamma")));
+        if (extension == "md" || extension == "txt")
+            QVERIFY(QGuiApplication::clipboard()->text().contains(QStringLiteral("Second line")));
+
+        if (extension == "md") {
+            auto *scope = quick ? app.window->property("quickPreview").value<QQuickItem *>()
+                                : app.item("millerPreviewColumn");
+            QVERIFY(scope);
+            auto *toggle = App::findItem(scope, QStringLiteral("previewSourceToggle"));
+            QVERIFY(toggle);
+            QVERIFY(QMetaObject::invokeMethod(toggle, "clicked"));
+            QTRY_VERIFY(document->textDocument()->toPlainText().contains(QStringLiteral("# Heading")));
+
+            text->forceActiveFocus();
+            QGuiApplication::clipboard()->clear();
+            QTest::keyClick(app.window, Qt::Key_A, Qt::ControlModifier);
+            QTest::keyClick(app.window, Qt::Key_C, Qt::ControlModifier);
+            QTRY_VERIFY(QGuiApplication::clipboard()->text().contains(QStringLiteral("# Heading")));
+            QVERIFY(!QGuiApplication::clipboard()->text().startsWith(QStringLiteral("file://")));
+        }
+
+        if (quick) {
+            QTest::keyClick(app.window, Qt::Key_Escape);
+            auto *previewScope = app.window->property("quickPreview").value<QQuickItem *>();
+            QVERIFY(previewScope);
+            QTRY_VERIFY(!previewScope->property("active").toBool());
+        }
+    }
+
     void testStrataPaneControls_data()
     {
         QTest::addColumn<QString>("mode");

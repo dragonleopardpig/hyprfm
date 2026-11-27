@@ -304,11 +304,18 @@ Q.Dialog {
                         anchors.margins: 7
                         text: depRow.dep ? depRow.dep.installCommand : ""
                         color: Theme.text
+                        selectionColor: Theme.accent
+                        selectedTextColor: Theme.base
                         font.family: "monospace"
                         font.pointSize: Theme.fontSmall
                         readOnly: true
                         selectByMouse: true
                         wrapMode: TextEdit.Wrap
+
+                        Keys.onShortcutOverride: event => {
+                            if (event.matches(StandardKey.Copy) || event.matches(StandardKey.SelectAll))
+                                event.accepted = true
+                        }
                     }
                 }
 
