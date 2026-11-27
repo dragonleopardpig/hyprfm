@@ -861,7 +861,7 @@ ApplicationWindow {
         callback()
     }
 
-    function navigatePaneTo(pane, path) {
+    function navigatePaneTo(pane, path, revealPath) {
         if (!tabModel.activeTab || !path)
             return
 
@@ -872,6 +872,9 @@ ApplicationWindow {
                 tabModel.activeTab.navigateSecondaryTo(path)
             else
                 tabModel.activeTab.navigateTo(path)
+            const view = revealPath ? root.fileViewForPane(pane) : null
+            if (view)
+                view.restoreSelection([revealPath], revealPath, path)
             root.scheduleActivePaneFocus()
         })
     }
@@ -1795,8 +1798,8 @@ ApplicationWindow {
             return
 
         var subView = subViewFor(fileViewForPane(targetPane))
-        if (subView && subView.selectedIndices !== undefined) {
-            subView.selectedIndices = [0]
+        if (subView && subView.restoreSelection) {
+            subView.restoreSelection([0], 0)
             if (targetPane === activePane)
                 subView.forceActiveFocus()
         }
@@ -3635,6 +3638,8 @@ ApplicationWindow {
                     else
                         fileOps.openFile(path)
                 }
+                onOpenContainingFolderRequested: path =>
+                    root.navigatePaneTo(root.activePane, fileOps.parentPath(path), path)
                 onOpenInNewTabRequested: (path) => root.openPathInNewTab(path)
                 onOpenWithRequested: (path, desktopFile) => fileOps.openFileWith(path, desktopFile)
                 onSetDefaultAppRequested: (mimeType, desktopFile) => {
@@ -4470,6 +4475,7 @@ ApplicationWindow {
         menu.targetPath = filePath !== "" ? filePath : currentDir
         menu.targetIsDir = filePath !== "" ? isDirectory : true
         menu.isEmptySpace = (filePath === "")
+        menu.isSearchResult = !menu.isEmptySpace && root.paneShowsSearchResults(pane)
         // A folder row offers itself; empty space offers the folder shown,
         // except in Recents and search results, which are not one folder.
         menu.favouritePath = filePath !== ""

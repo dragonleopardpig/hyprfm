@@ -23,11 +23,13 @@ Item {
     property int menuWidth: 260
     property bool splitViewEnabled: false
     property bool isTrashView: false
+    property bool isSearchResult: false
     // Folder an "Add to Favourites" item would add; empty hides the item
     // (a file, a virtual place, or a folder already in Favourites).
     property string favouritePath: ""
 
     signal openRequested(string path, bool isDir)
+    signal openContainingFolderRequested(string path)
     signal openWithRequested(string path, string desktopFile)
     signal setDefaultAppRequested(string mimeType, string desktopFile)
     signal chooseAppRequested(string path, string mimeType)
@@ -720,6 +722,8 @@ Item {
         }
         if (!isEmptySpace && targetPath !== "") {
             items.push({ text: "Open", shortcut: keys("open"), action: "open", icon: "ExternalLink" })
+            if (isSearchResult)
+                items.push({ text: "Open Containing Folder", action: "open_containing_folder", icon: "Folder" })
             if (targetIsDir)
                 items.push({ text: "Open in New Tab", shortcut: keys("open_in_new_tab"), action: "opennewtab", icon: "Folder" })
             if (!splitViewEnabled && !isTrashView) {
@@ -878,6 +882,7 @@ Item {
         root.close()
         switch (action) {
         case "open": openRequested(targetPath, targetIsDir || isEmptySpace); break
+        case "open_containing_folder": openContainingFolderRequested(targetPath); break
         case "opennewtab": openInNewTabRequested(targetPath); break
         case "openwith": openWithRequested(targetPath, extraData); break
         case "setdefault": if (mimeType && extraData) setDefaultAppRequested(mimeType, extraData); break

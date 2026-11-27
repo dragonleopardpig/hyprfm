@@ -119,6 +119,10 @@ Item {
         return detailedViewItem
     }
     property var pendingSelection: null
+    onCurrentPathChanged: {
+        if (pendingSelection && pendingSelection.destination !== currentPath)
+            pendingSelection = null
+    }
     function restoreSelection(paths, cursorPath, destination) {
         pendingSelection = {paths: paths, cursor: cursorPath, destination: destination}
         Qt.callLater(applyPendingSelection)

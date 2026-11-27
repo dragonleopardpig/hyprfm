@@ -183,6 +183,8 @@ FocusScope {
     property alias previewControls: zoomControls
     function rowForPath(path) { return currentColumn.rowForPath(path) }
     function restoreSelection(indices, cursor) {
+        currentColumn.autoSelectFirst = false
+        currentColumn.pendingFocusPath = ""
         currentColumn.selectedIndices = indices
         currentColumn.cursorIndex = cursor
         currentColumn.lastSelectedIndex = indices.length ? indices[0] : -1

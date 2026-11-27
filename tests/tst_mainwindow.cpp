@@ -1528,6 +1528,94 @@ private slots:
         QTRY_COMPARE(statusBar->property("itemCount").toInt(), 4);
     }
 
+    void testOpenContainingFolderFromSearch_data()
+    {
+        QTest::addColumn<QString>("pane");
+        QTest::addColumn<QString>("viewMode");
+        QTest::addColumn<bool>("sameFolder");
+        QTest::newRow("grid") << "primary" << "grid" << false;
+        QTest::newRow("already-in-folder") << "primary" << "miller" << true;
+        QTest::newRow("split-column") << "secondary" << "miller" << false;
+    }
+
+    void testOpenContainingFolderFromSearch()
+    {
+        QFETCH(QString, pane);
+        QFETCH(QString, viewMode);
+        QFETCH(bool, sameFolder);
+        App app;
+        QVERIFY(app.load());
+        const QString directory = app.home.path() + "/search-root";
+        const QString containingFolder = sameFolder ? directory : directory + "/target";
+        const QString otherFolder = directory + "/other";
+        QVERIFY(QDir().mkpath(containingFolder));
+        QVERIFY(QDir().mkpath(otherFolder));
+        const QString file = containingFolder + "/match.txt";
+        for (const QString &path : {file, otherFolder + "/match.txt", containingFolder + "/aaa.txt"}) {
+            QFile entry(path);
+            QVERIFY(entry.open(QIODevice::WriteOnly));
+            entry.write("test");
+        }
+
+        auto *tab = app.tabModel->activeTab();
+        tab->setViewMode(viewMode);
+        const bool secondary = pane == "secondary";
+        if (secondary) {
+            tab->navigateTo(app.home.path());
+            QVERIFY(QMetaObject::invokeMethod(app.window, "toggleSplitView"));
+            tab->navigateSecondaryTo(directory);
+            QVERIFY(QMetaObject::invokeMethod(app.window, "setActivePane", Q_ARG(QVariant, pane)));
+        } else {
+            tab->navigateTo(directory);
+        }
+        QVERIFY(QMetaObject::invokeMethod(app.window, "openSearch"));
+        QVERIFY(QMetaObject::invokeMethod(app.window, "handleSearchQuery",
+                                          Q_ARG(QVariant, QStringLiteral("match"))));
+        QVERIFY(QMetaObject::invokeMethod(app.window, "handleSearchEnter"));
+        auto *proxy = secondary ? qobject_cast<SearchProxyModel *>(
+            app.engine.rootContext()->contextProperty("splitSearchProxy").value<QObject *>()) : app.searchProxy;
+        QVERIFY(proxy);
+        QTRY_COMPARE(proxy->rowCount(), 2);
+        int row = 0;
+        while (row < proxy->rowCount() && proxy->filePath(row) != file)
+            ++row;
+        QVERIFY(row < proxy->rowCount());
+
+        QVariant containerResult;
+        QVERIFY(QMetaObject::invokeMethod(app.window, "fileViewForPane", Q_RETURN_ARG(QVariant, containerResult),
+                                          Q_ARG(QVariant, pane)));
+        auto *container = containerResult.value<QQuickItem *>();
+        QVERIFY(container);
+        auto *list = viewMode == "miller" ? App::findItem(container, "millerCurrentColumn")
+                                          : container->property("gridViewItem").value<QQuickItem *>();
+        QVERIFY(list);
+        auto resultItem = [&] {
+            QQuickItem *item = nullptr;
+            QMetaObject::invokeMethod(list, "itemAtIndex", Q_RETURN_ARG(QQuickItem *, item), Q_ARG(int, row));
+            return item;
+        };
+        QTRY_VERIFY(resultItem());
+        QTest::mouseClick(app.window, Qt::RightButton, {}, app.center(resultItem()));
+        QTRY_VERIFY(app.item("contextMenu") && app.item("contextMenu")->isVisible());
+        auto *menu = app.item("contextMenu");
+        QCOMPARE(menu->property("targetPath").toString(), file);
+        const QString label = QStringLiteral("Open Containing Folder");
+        QTRY_VERIFY(App::findText(menu, label));
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, app.center(App::findText(menu, label)));
+
+        QTRY_COMPARE(secondary ? tab->secondaryCurrentPath() : tab->currentPath(), containingFolder);
+        QTRY_VERIFY(!app.window->property("searchMode").toBool());
+        if (secondary)
+            QCOMPARE(tab->currentPath(), app.home.path());
+        auto selectedPaths = [&] {
+            QVariant paths;
+            QMetaObject::invokeMethod(app.window, "getSelectedPaths", Q_RETURN_ARG(QVariant, paths),
+                                      Q_ARG(QVariant, pane));
+            return paths.toStringList();
+        };
+        QTRY_COMPARE(selectedPaths(), QStringList{file});
+    }
+
     // Clicking the current folder or the empty space in the breadcrumb edits
     // the path (#62); the other segments still navigate.
     void testBreadcrumbCurrentFolderClickEditsPath()
