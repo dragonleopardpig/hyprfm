@@ -844,8 +844,11 @@ FocusScope {
 
                 // The remove transition leaves opacity/scale animated down, and
                 // reuseItems recycles that item as-is (view transitions never
-                // re-run on reuse) — without this reset the row comes back blank.
-                ListView.onReused: { opacity = 1; scale = 1 }
+                // re-run on reuse). If the remove transition is interrupted
+                // (e.g. by a model reset), Qt pools the delegate without
+                // culling it, leaving a ghost row overlapping surviving rows.
+                ListView.onPooled: visible = false
+                ListView.onReused: { visible = true; opacity = 1; scale = 1 }
 
                 required property int index
                 required property string fileName

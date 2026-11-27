@@ -208,6 +208,40 @@ private slots:
         QCOMPARE(h.config->listColumns(), QStringList({"name", "size", "modified", "type", "owner"}));
         QTRY_VERIFY(h.item("headerColumn_owner") != nullptr);
     }
+
+    void testModelResetDuringRemoveHidesPooledDelegate()
+    {
+        Harness h;
+        QVERIFY(h.load());
+        auto *listView = h.item("listView");
+        QVERIFY(listView);
+        auto *content = listView->property("contentItem").value<QQuickItem *>();
+        QVERIFY(content);
+
+        h.files.removeFile(QStringLiteral("b.txt"));
+        h.model->refresh();
+        QTest::qWait(30);
+        h.model->setShowHidden(true);
+        QTest::qWait(450);
+
+        int activeCount = 0;
+        for (QQuickItem *child : content->childItems()) {
+            if (!child->property("fileName").isValid())
+                continue;
+            const int idx = child->property("index").toInt();
+            if (idx < 0) {
+                QVERIFY2(!child->isVisible(),
+                         qPrintable(QStringLiteral("Pooled delegate still visible: %1")
+                                        .arg(child->property("fileName").toString())));
+                continue;
+            }
+            QVERIFY(child->isVisible());
+            QVERIFY(qFuzzyCompare(child->opacity(), 1.0));
+            QVERIFY(qFuzzyCompare(child->scale(), 1.0));
+            ++activeCount;
+        }
+        QCOMPARE(activeCount, h.model->rowCount());
+    }
 };
 
 QTEST_MAIN(TestDetailedView)

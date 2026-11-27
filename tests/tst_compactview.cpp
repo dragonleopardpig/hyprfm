@@ -1,4 +1,6 @@
 #include <QTest>
+#include <QPair>
+#include <QSet>
 #include <QSignalSpy>
 #include <QWheelEvent>
 #include "viewharness.h"
@@ -166,6 +168,70 @@ private slots:
         QVERIFY(restored.compactFullNames());
         h.config->saveSettings({{"compactFullNames", false}});
         QTRY_COMPARE(root->property("cellWidth").toReal(), narrow);
+    }
+
+    void testRemovingLongestFolderHidesPooledDelegate()
+    {
+        Harness h;
+        for (const QString &dir : {"Books", "DONE READING", "Papers",
+                                   "Project_VeryLongName_Tools", "References"})
+            h.files.createDir(dir);
+        QVERIFY(h.load(QStringLiteral("src/qml/views/FileCompactView.qml"), "model"));
+
+        auto *root = h.view.rootObject();
+        h.config->saveSettings({{"compactFullNames", true}});
+        QTRY_VERIFY(root->property("compactNameWidth").toReal() > 0);
+        QTest::qWait(50);
+        const qreal widthBefore = root->property("cellWidth").toReal();
+
+        QVERIFY(QDir(h.files.path() + "/Project_VeryLongName_Tools").removeRecursively());
+        h.model->refresh();
+
+        QTRY_VERIFY(root->property("cellWidth").toReal() < widthBefore);
+        QTest::qWait(450);
+
+        auto *content = root->property("contentItem").value<QQuickItem *>();
+        QVERIFY(content);
+
+        auto verifyDelegates = [&](bool requireZebra) {
+            int activeCount = 0;
+            bool sawZebra = false;
+            QSet<QPair<int, int>> positions;
+            for (QQuickItem *child : content->childItems()) {
+                if (!child->property("fileName").isValid())
+                    continue;
+                const int idx = child->property("index").toInt();
+                if (idx < 0) {
+                    QVERIFY2(!child->isVisible(),
+                             qPrintable(QStringLiteral("Pooled delegate still visible: %1")
+                                            .arg(child->property("fileName").toString())));
+                    continue;
+                }
+                QVERIFY(child->isVisible());
+                QVERIFY(qFuzzyCompare(child->opacity(), 1.0));
+                QVERIFY(qFuzzyCompare(child->scale(), 1.0));
+                const QPair<int, int> pos(qRound(child->x()), qRound(child->y()));
+                QVERIFY2(!positions.contains(pos),
+                         qPrintable(QStringLiteral("Overlapping delegate at (%1, %2)")
+                                        .arg(pos.first).arg(pos.second)));
+                positions.insert(pos);
+                ++activeCount;
+                if (child->property("fileName").toString() == QLatin1String("Zebra"))
+                    sawZebra = true;
+            }
+            QCOMPARE(activeCount, h.model->rowCount());
+            if (requireZebra)
+                QVERIFY(sawZebra);
+        };
+
+        verifyDelegates(false);
+
+        h.files.createDir(QStringLiteral("Zebra"));
+        h.model->refresh();
+        QTRY_COMPARE(h.model->rowCount(), 8);
+        QTest::qWait(300);
+
+        verifyDelegates(true);
     }
 };
 

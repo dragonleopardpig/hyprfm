@@ -667,8 +667,12 @@ GridView {
 
         // The remove transition leaves opacity/scale animated down, and
         // reuseItems recycles that item as-is (view transitions never re-run
-        // on reuse) — without this reset the cell comes back blank.
-        GridView.onReused: { opacity = 1; scale = 1 }
+        // on reuse). If the remove transition is interrupted (for example
+        // when Compact view shrinks cellWidth on count change, or on a model
+        // reset), Qt pools the delegate without culling it, leaving a painted
+        // ghost overlapping surviving items. Hide on pool and restore on reuse.
+        GridView.onPooled: visible = false
+        GridView.onReused: { visible = true; opacity = 1; scale = 1 }
         Accessible.role: Accessible.ListItem
         Accessible.name: fileName + (isDir ? ", folder" : "")
         Accessible.selected: isSelected
