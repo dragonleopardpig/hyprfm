@@ -53,6 +53,7 @@
 #include "services/diskusageservice.h"
 #include "services/draghelper.h"
 #include "services/fileoperations.h"
+#include "services/filesystemtasks.h"
 #include "services/gitstatusservice.h"
 #include "services/metadataextractor.h"
 #include "services/previewservice.h"
@@ -4702,16 +4703,81 @@ private slots:
 
     // ── Favourites ─────────────────────────────────────────────────────
 
-    static void dropUrls(App &app, const QPoint &pos, const QList<QUrl> &urls)
+    static Qt::DropAction dropUrls(App &app, const QPoint &pos, const QList<QUrl> &urls,
+                                   Qt::DropActions actions = Qt::CopyAction,
+                                   Qt::KeyboardModifiers modifiers = Qt::NoModifier)
     {
         QMimeData mime;
         mime.setUrls(urls);
-        QDragEnterEvent enter(pos, Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
+        QDragEnterEvent enter(pos, actions, &mime, Qt::LeftButton, modifiers);
         QCoreApplication::sendEvent(app.window, &enter);
-        QDragMoveEvent move(pos, Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
+        QDragMoveEvent move(QPointF(pos), actions, &mime, Qt::LeftButton, modifiers);
         QCoreApplication::sendEvent(app.window, &move);
-        QDropEvent drop(QPointF(pos), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
+        QDropEvent drop(QPointF(pos), actions, &mime, Qt::LeftButton, modifiers);
         QCoreApplication::sendEvent(app.window, &drop);
+        return drop.isAccepted() ? drop.dropAction() : Qt::IgnoreAction;
+    }
+
+    void testSplitDropChoosesCopyOrMove_data()
+    {
+        QTest::addColumn<QString>("viewMode");
+        QTest::addColumn<bool>("differentMount");
+        QTest::addColumn<Qt::KeyboardModifiers>("modifiers");
+        QTest::addColumn<Qt::DropAction>("action");
+        QTest::newRow("grid-across-mounts") << "grid" << true << Qt::KeyboardModifiers{} << Qt::CopyAction;
+        QTest::newRow("detailed-same-mount") << "detailed" << false << Qt::KeyboardModifiers{} << Qt::MoveAction;
+        QTest::newRow("compact-ctrl") << "compact" << false << Qt::KeyboardModifiers{Qt::ControlModifier} << Qt::CopyAction;
+        QTest::newRow("miller-shift") << "miller" << true << Qt::KeyboardModifiers{Qt::ShiftModifier} << Qt::MoveAction;
+    }
+
+    void testSplitDropChoosesCopyOrMove()
+    {
+        QFETCH(QString, viewMode);
+        QFETCH(bool, differentMount);
+        QFETCH(Qt::KeyboardModifiers, modifiers);
+        QFETCH(Qt::DropAction, action);
+        App app;
+        QTemporaryDir destination(differentMount ? QStringLiteral("/dev/shm/hyprfm-drop-XXXXXX")
+                                                : app.home.filePath("drop-XXXXXX"));
+        const MountTable mounts;
+        const auto sourceMount = mounts.forPath(app.home.path());
+        if (sourceMount.isEmpty() || (differentMount
+                && (!destination.isValid() || mounts.forPath(destination.path()) == sourceMount)))
+            QSKIP("The test needs a known mount for each pane");
+        QVERIFY(destination.isValid());
+        const QString source = app.home.filePath("dragged folder");
+        QVERIFY(QDir().mkpath(source));
+        {
+            QFile file(source + "/document.txt");
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            QCOMPARE(file.write("test contents"), 13);
+        }
+        QVERIFY(app.load());
+        auto *tab = app.tabModel->activeTab();
+        tab->navigateTo(app.home.path());
+        tab->setViewMode(viewMode);
+        QVERIFY(QMetaObject::invokeMethod(app.window, "toggleSplitView"));
+        tab->navigateSecondaryTo(destination.path());
+
+        QVariant secondary;
+        QTRY_VERIFY(QMetaObject::invokeMethod(app.window, "fileViewForPane", Q_RETURN_ARG(QVariant, secondary),
+                                              Q_ARG(QVariant, QStringLiteral("secondary")))
+                    && secondary.value<QQuickItem *>());
+        auto *view = secondary.value<QQuickItem *>();
+        QTRY_VERIFY(view->width() > 0 && view->height() > 0);
+        auto *fileOps = qobject_cast<FileOperations *>(
+            app.engine.rootContext()->contextProperty("fileOps").value<QObject *>());
+        QVERIFY(fileOps);
+        QSignalSpy finished(fileOps, &FileOperations::operationFinished);
+        const QPoint target = view->mapToScene(QPointF(view->width() * 0.45, view->height() * 0.75)).toPoint();
+        QCOMPARE(dropUrls(app, target, {QUrl::fromLocalFile(source)}, Qt::CopyAction | Qt::MoveAction, modifiers),
+                 action);
+        QTRY_COMPARE(finished.count(), 1);
+        QVERIFY2(finished.at(0).at(0).toBool(), qPrintable(finished.at(0).at(1).toString()));
+        QFile copied(destination.filePath("dragged folder/document.txt"));
+        QVERIFY(copied.open(QIODevice::ReadOnly));
+        QCOMPARE(copied.readAll(), QByteArray("test contents"));
+        QCOMPARE(QFile::exists(source + "/document.txt"), action == Qt::CopyAction);
     }
 
     // With no favourites and no split the section used to collapse to 0 px,

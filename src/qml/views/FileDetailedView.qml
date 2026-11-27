@@ -111,30 +111,6 @@ FocusScope {
     signal interactionStarted()
     signal transferRequested(var paths, string destinationPath, bool moveOperation)
 
-    function dropPaths(drop) {
-        if (dragHelper.active && dragHelper.activePaths.length > 0)
-            return dragHelper.activePaths.slice()
-
-        var paths = []
-        var urls = drop.urls || []
-
-        for (var i = 0; i < urls.length; i++) {
-            var s = urls[i].toString()
-            paths.push(s.startsWith("file://") ? decodeURIComponent(s.substring(7)) : s)
-        }
-
-        if (paths.length === 0 && drop.hasText) {
-            var lines = drop.text.split("\n")
-            for (var j = 0; j < lines.length; j++) {
-                var line = lines[j].trim()
-                if (line !== "")
-                    paths.push(line.startsWith("file://") ? decodeURIComponent(line.substring(7)) : line)
-            }
-        }
-
-        return paths
-    }
-
     function selectIndex(idx, ctrl, shift) {
         if (shift && lastSelectedIndex >= 0) {
             var lo = Math.min(idx, lastSelectedIndex)
@@ -1244,22 +1220,12 @@ FocusScope {
 
 
 
-                DropArea {
+                FileDropArea {
                     id: folderDropArea
                     anchors.fill: parent
-                    keys: ["text/uri-list"]
                     enabled: detRow.isDir && !detRow.isSelected
-
-                    onDropped: (drop) => {
-                        var paths = root.dropPaths(drop)
-                        if (paths.length === 0) return
-                        var dominated = paths.some(function(p) {
-                            return detRow.filePath === p || detRow.filePath.startsWith(p + "/")
-                        })
-                        if (dominated) return
-                        root.transferRequested(paths, detRow.filePath, drop.proposedAction !== Qt.CopyAction)
-                        drop.acceptProposedAction()
-                    }
+                    destinationPath: detRow.filePath
+                    onTransferRequested: (paths, path, move) => root.transferRequested(paths, path, move)
                 }
 
                 Rectangle {
@@ -1393,27 +1359,11 @@ FocusScope {
             }
 
             // ── Drop area ─────────────────────────────────────────────────
-            DropArea {
+            FileDropArea {
                 anchors.fill: parent
-                keys: ["text/uri-list"]
                 z: -2
-
-                onDropped: (drop) => {
-                    if (!root.currentPath) return
-                    var paths = root.dropPaths(drop)
-                    if (paths.length === 0) return
-                    // Don't move files into the directory they're already in
-                    var allSameDir = paths.every(function(p) {
-                        var parentDir = p.substring(0, p.lastIndexOf("/"))
-                        return parentDir === root.currentPath
-                    })
-                    if (allSameDir) return
-                    if (drop.proposedAction === Qt.MoveAction)
-                        root.transferRequested(paths, root.currentPath, true)
-                    else
-                        root.transferRequested(paths, root.currentPath, false)
-                    drop.acceptProposedAction()
-                }
+                destinationPath: root.currentPath
+                onTransferRequested: (paths, path, move) => root.transferRequested(paths, path, move)
             }
 
             // ── Rubber-band selection + empty space clicks ───────────────

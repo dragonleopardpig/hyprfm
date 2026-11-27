@@ -1,8 +1,10 @@
 #include "draghelper.h"
+#include "filesystemtasks.h"
 #include "providers/iconprovider.h"
 
 #include <QDrag>
-#include <QGuiApplication>
+#include <QDropEvent>
+#include <QCoreApplication>
 #include <QMimeData>
 #include <QPainter>
 #include <QPixmap>
@@ -10,11 +12,13 @@
 #include <QUrl>
 #include <QFileInfo>
 #include <QUrlQuery>
+#include <algorithm>
 
 DragHelper::DragHelper(IconProvider *iconProvider, QObject *parent)
     : QObject(parent)
     , m_iconProvider(iconProvider)
 {
+    QCoreApplication::instance()->installEventFilter(this);
 }
 
 bool DragHelper::active() const
@@ -25,6 +29,44 @@ bool DragHelper::active() const
 QStringList DragHelper::activePaths() const
 {
     return m_activePaths;
+}
+
+bool DragHelper::eventFilter(QObject *watched, QEvent *event)
+{
+    // QML's DragEvent exposes the proposed action but not the modifiers.
+    if (event->type() == QEvent::DragEnter || event->type() == QEvent::DragMove
+            || event->type() == QEvent::Drop)
+        m_dropModifiers = static_cast<QDropEvent *>(event)->modifiers();
+    return QObject::eventFilter(watched, event);
+}
+
+int DragHelper::defaultFileDropAction(const QStringList &paths, const QString &destination) const
+{
+    // Reading mountinfo avoids touching a possibly stalled remote filesystem
+    // while the pointer is over a drop target.
+    const MountTable mounts;
+    const auto targetMount = mounts.forPath(destination);
+    if (!targetMount.isEmpty() && !paths.isEmpty()
+            && std::all_of(paths.cbegin(), paths.cend(), [&](const QString &path) {
+                return mounts.forPath(path) == targetMount;
+            }))
+        return Qt::MoveAction;
+    return Qt::CopyAction;
+}
+
+int DragHelper::fileDropAction(int defaultAction, int supportedActions) const
+{
+    const bool copy = supportedActions & Qt::CopyAction;
+    const bool move = supportedActions & Qt::MoveAction;
+    if (copy && m_dropModifiers.testFlag(Qt::ControlModifier))
+        return Qt::CopyAction;
+    if (move && m_dropModifiers.testFlag(Qt::ShiftModifier))
+        return Qt::MoveAction;
+    if (supportedActions & defaultAction)
+        return defaultAction;
+    if (copy)
+        return Qt::CopyAction;
+    return move ? Qt::MoveAction : Qt::IgnoreAction;
 }
 
 void DragHelper::startDrag(const QStringList &filePaths,
@@ -114,7 +156,7 @@ void DragHelper::startDrag(const QStringList &filePaths,
         drag->setPixmap(pixmap);
         drag->setHotSpot(QPoint(iconSize / 2, count > 1 ? badgeH / 2 + iconSize / 2 : iconSize / 2));
 
-        drag->exec(Qt::CopyAction | Qt::MoveAction, Qt::MoveAction);
+        drag->exec(Qt::CopyAction | Qt::MoveAction, Qt::CopyAction);
 
         m_activePaths.clear();
         m_active = false;

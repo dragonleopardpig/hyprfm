@@ -574,38 +574,6 @@ GridView {
     }
 
     // Parse file paths from a drop event
-    function parseDragPaths(drop) {
-        if (dragHelper.active && dragHelper.activePaths.length > 0)
-            return dragHelper.activePaths.slice()
-
-        var paths = []
-
-        function decodePath(value) {
-            return value.startsWith("file://") ? decodeURIComponent(value.substring(7)) : value
-        }
-
-        // Try drop.urls first (system DnD)
-        if (drop.urls && drop.urls.length > 0) {
-            for (var i = 0; i < drop.urls.length; i++) {
-                var s = drop.urls[i].toString()
-                paths.push(decodePath(s))
-            }
-        }
-
-        // Fallback: parse text/uri-list from text mime data
-        if (paths.length === 0 && drop.hasText) {
-            var text = drop.text
-            var lines = text.split("\n")
-            for (var j = 0; j < lines.length; j++) {
-                var line = lines[j].trim()
-                if (line !== "")
-                    paths.push(decodePath(line))
-            }
-        }
-
-        return paths
-    }
-
     // ── Drag state ─────────────────────────────────────────────────────────
     property string dragIconName: ""
     property string dragFileName: ""
@@ -722,23 +690,12 @@ GridView {
         readonly property bool isPastePending: fileOps.pendingTargetPaths.indexOf(delegateItem.filePath) >= 0
 
         // Per-folder drop target
-        DropArea {
+        FileDropArea {
             id: folderDropArea
             anchors.fill: selectionRect
-            keys: ["text/uri-list"]
             enabled: delegateItem.isDir && !delegateItem.isSelected
-
-            onDropped: (drop) => {
-                var paths = root.parseDragPaths(drop)
-                if (paths.length === 0) return
-                // Don't move into itself or its own parent
-                var dominated = paths.some(function(p) {
-                    return delegateItem.filePath === p || delegateItem.filePath.startsWith(p + "/")
-                })
-                if (dominated) return
-                root.transferRequested(paths, delegateItem.filePath, drop.proposedAction !== Qt.CopyAction)
-                drop.accept()
-            }
+            destinationPath: delegateItem.filePath
+            onTransferRequested: (paths, path, move) => root.transferRequested(paths, path, move)
         }
 
         // Compact rows show icons, not file thumbnails; a folder's custom icon
@@ -1074,10 +1031,9 @@ GridView {
     }
 
     // ── Drop area: accept files dropped onto this view ───────────────────────
-    DropArea {
+    FileDropArea {
         id: viewDropArea
         anchors.fill: parent
-        keys: ["text/uri-list"]
         z: -2
 
         // Subtle background hint — only when not hovering a specific folder
@@ -1089,20 +1045,8 @@ GridView {
             radius: Theme.radiusMedium
             visible: parent.containsDrag
         }
-
-        onDropped: (drop) => {
-            if (!root.currentPath) return
-            var paths = root.parseDragPaths(drop)
-            if (paths.length === 0) return
-            // Don't move files into the directory they're already in
-            var allSameDir = paths.every(function(p) {
-                var parentDir = p.substring(0, p.lastIndexOf("/"))
-                return parentDir === root.currentPath
-            })
-            if (allSameDir) return
-            root.transferRequested(paths, root.currentPath, drop.proposedAction !== Qt.CopyAction)
-            drop.accept()
-        }
+        destinationPath: root.currentPath
+        onTransferRequested: (paths, path, move) => root.transferRequested(paths, path, move)
     }
 
     // ── Rubber-band selection + empty space clicks ───────────────────────────

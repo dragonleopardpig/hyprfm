@@ -718,30 +718,10 @@ Rectangle {
                                 color: "transparent"
 
                                 // Drop area on tab
-                                DropArea {
-                                    id: tabDropArea
+                                FileDropArea {
                                     anchors.fill: parent
-                                    keys: ["text/uri-list"]
-
-                                    onDropped: (drop) => {
-                                        var destPath = tabDelegate.model.path
-                                        if (!destPath) return
-                                        var urls = drop.urls
-                                        var paths = []
-                                        for (var i = 0; i < urls.length; i++) {
-                                            var s = urls[i].toString()
-                                            paths.push(s.startsWith("file://") ? decodeURIComponent(s.substring(7)) : s)
-                                        }
-                                        if (paths.length === 0) return
-                                        // Don't move files into the directory they're already in
-                                        var allSameDir = paths.every(function(p) {
-                                            var parentDir = p.substring(0, p.lastIndexOf("/"))
-                                            return parentDir === destPath
-                                        })
-                                        if (allSameDir) return
-                                        root.transferRequested(paths, destPath, drop.proposedAction === Qt.MoveAction)
-                                        drop.acceptProposedAction()
-                                    }
+                                    destinationPath: tabDelegate.model.path
+                                    onTransferRequested: (paths, path, move) => root.transferRequested(paths, path, move)
                                 }
 
                                 SequentialAnimation {
