@@ -12,6 +12,8 @@ Item {
     property Flickable keyboardScrollTarget: scrollTarget
     property var pageWheel: null
     property real factor: 1.0
+    readonly property int zoomPercent: Math.round(factor * 100)
+    readonly property bool isDefaultZoom: zoomPercent === 100
     readonly property real minimum: 0.25
     readonly property real maximum: 4.0
     property bool sourceAvailable: false
@@ -87,6 +89,7 @@ Item {
             id: zoomSlider
             objectName: "previewZoomSlider"
             Layout.fillWidth: true
+            Layout.minimumWidth: 48
             from: root.minimum
             to: root.maximum
             stepSize: 0.05
@@ -98,12 +101,24 @@ Item {
             Keys.onLeftPressed: event => { root.setFactor(root.factor - 0.05); event.accepted = true }
             Keys.onRightPressed: event => { root.setFactor(root.factor + 0.05); event.accepted = true }
         }
-        Text {
-            text: Math.round(root.factor * 100) + "%"
-            color: Theme.subtext
-            font.pointSize: Theme.fontSmall
-            horizontalAlignment: Text.AlignRight
-            Layout.preferredWidth: 42 * Theme.uiScale
+        HoverRect {
+            id: zoomPercentButton
+            objectName: "previewZoomPercent"
+            Layout.preferredWidth: Math.ceil(48 * Theme.uiScale)
+            Layout.preferredHeight: Theme.compactControlSize
+            Layout.alignment: Qt.AlignVCenter
+            tooltip: qsTr("Reset preview zoom to 100%")
+            shortcut: "text_reset"
+            Accessible.role: Accessible.Button
+            Accessible.name: qsTr("Preview zoom %1%, reset to 100%").arg(root.zoomPercent)
+            onClicked: { root.reset(); root.focusPreview() }
+            Text {
+                anchors.centerIn: parent
+                text: root.zoomPercent + "%"
+                color: root.isDefaultZoom ? Theme.subtext : Theme.text
+                font.pointSize: Theme.fontSmall
+                font.weight: root.isDefaultZoom ? Font.Normal : Font.Medium
+            }
         }
         Q.Button {
             objectName: "previewSourceToggle"
@@ -118,13 +133,37 @@ Item {
             }
         }
         HoverRect {
+            id: resetZoomButton
             objectName: "resetPreviewZoom"
-            width: Theme.controlSize
-            height: Theme.controlSize
-            tooltip: qsTr("Reset preview zoom")
+            Layout.preferredWidth: Math.max(Theme.controlSize, Math.ceil(46 * Theme.uiScale))
+            Layout.preferredHeight: Theme.compactControlSize
+            Layout.alignment: Qt.AlignVCenter
+            tooltip: qsTr("Reset preview zoom to 100%")
+            shortcut: "text_reset"
             Accessible.role: Accessible.Button
+            Accessible.name: qsTr("Reset preview zoom to 100%")
+            color: !root.isDefaultZoom
+                ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, hovered ? 0.22 : 0.12)
+                : (hovered ? Qt.rgba(Theme.text.r, Theme.text.g, Theme.text.b, 0.1) : "transparent")
+            border.width: root.isDefaultZoom ? 0 : 1
+            border.color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, hovered ? 0.55 : 0.35)
             onClicked: { root.reset(); root.focusPreview() }
-            IconUndo { anchors.centerIn: parent; size: 16; color: Theme.text }
+            Text {
+                objectName: "resetPreviewZoomLabel"
+                anchors.centerIn: parent
+                visible: !root.isDefaultZoom
+                text: "100%"
+                color: Theme.accent
+                font.pointSize: Theme.fontSmall
+                font.weight: Font.DemiBold
+            }
+            IconUndo {
+                anchors.centerIn: parent
+                visible: root.isDefaultZoom
+                size: 16
+                color: Theme.subtext
+                opacity: resetZoomButton.hovered ? 0.9 : 0.5
+            }
         }
     }
     // The interface text-size keys act on the preview while it has focus;

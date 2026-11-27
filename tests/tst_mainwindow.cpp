@@ -461,8 +461,24 @@ private slots:
         QCOMPARE(controls->property("factor").toReal(), 2.5);
         auto *reset = App::findItem(controls, "resetPreviewZoom");
         QVERIFY(reset);
+        QVERIFY(reset->width() > 0 && reset->height() > 0);
+        auto *resetLabel = App::findItem(reset, "resetPreviewZoomLabel");
+        QVERIFY(resetLabel);
+        QTRY_VERIFY(resetLabel->isVisible());
+        QCOMPARE(resetLabel->property("text").toString(), QStringLiteral("100%"));
         QTest::mouseClick(app.window, Qt::LeftButton, {}, app.center(reset));
         QTRY_COMPARE(controls->property("factor").toReal(), 1.0);
+        QTRY_COMPARE(slider->property("value").toReal(), 1.0);
+        QTRY_VERIFY(!resetLabel->isVisible());
+
+        QVERIFY(QMetaObject::invokeMethod(controls, "setFactor", Q_ARG(QVariant, 1.75)));
+        QTRY_COMPARE(controls->property("factor").toReal(), 1.75);
+        auto *percent = App::findItem(controls, "previewZoomPercent");
+        QVERIFY(percent);
+        QVERIFY(percent->width() > 0 && percent->height() > 0);
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, app.center(percent));
+        QTRY_COMPARE(controls->property("factor").toReal(), 1.0);
+        QTRY_COMPARE(slider->property("value").toReal(), 1.0);
     }
 
     void testMagnifiedImageCanScroll()
