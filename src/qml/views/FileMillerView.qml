@@ -59,6 +59,11 @@ FocusScope {
 
     readonly property string currentDirName: currentPath ? fileOps.displayNameForPath(currentPath) : ""
 
+    function singleLineFileName(name: string): string {
+        // A file name can contain hard line breaks even in a fixed-height row.
+        return name.replace(/\r\n|[\r\n\v\f\u0085\u2028\u2029]/g, " ")
+    }
+
     property int rowHeight: 28
 
     // Column widths as fractions of the view (preview takes the rest).
@@ -422,7 +427,7 @@ FocusScope {
                             width: parent.width - root.millerIconSize - parent.spacing - (parentDelegate.isDir ? root.millerIconSize : 0) - parent.anchors.leftMargin - parent.anchors.rightMargin
                             anchors.verticalCenter: parent.verticalCenter
                             textFormat: Text.PlainText
-                            text: parentDelegate.fileName
+                            text: root.singleLineFileName(parentDelegate.fileName)
                             color: parentDelegate.isCurrentDir ? Theme.text : Theme.subtext
                             font.pointSize: Theme.fontSmall
                             font.bold: parentDelegate.isCurrentDir
@@ -1049,13 +1054,15 @@ FocusScope {
 
                         Text {
                             id: currentNameText
+                            objectName: "millerCurrentName"
                             width: parent.width - (root.millerIconSize + 2) - (currentDelegate.isDir ? (root.millerIconSize + 2) : 0) - parent.spacing * (currentDelegate.isDir ? 2 : 1) - parent.anchors.leftMargin - parent.anchors.rightMargin
                             visible: !currentNameEditor.editing
                             anchors.verticalCenter: parent.verticalCenter
+                            readonly property string rowName: root.singleLineFileName(currentDelegate.fileName)
                             textFormat: root.highlightQuery ? Text.StyledText : Text.PlainText
                             text: root.highlightQuery
-                                ? Theme.highlightMatch(currentDelegate.fileName, root.highlightQuery)
-                                : currentDelegate.fileName
+                                ? Theme.highlightMatch(rowName, root.highlightQuery)
+                                : rowName
                             color: Theme.text
                             font.pointSize: Theme.fontNormal
                             elide: Text.ElideRight
@@ -1629,7 +1636,7 @@ FocusScope {
                                     width: parent.width - 14 - parent.spacing - parent.anchors.leftMargin - parent.anchors.rightMargin
                                     anchors.verticalCenter: parent.verticalCenter
                                     textFormat: Text.PlainText
-                                    text: fileName
+                                    text: root.singleLineFileName(fileName)
                                     color: Theme.subtext
                                     font.pointSize: Theme.fontSmall
                                     elide: Text.ElideRight

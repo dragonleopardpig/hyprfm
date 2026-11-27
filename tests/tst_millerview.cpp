@@ -89,6 +89,35 @@ private slots:
         QVERIFY(h.config->millerFractions().value("parent").toDouble() >= ConfigManager::kMillerMinFraction - 1e-9);
     }
 
+    void testFileNameWithLineBreaksStaysOnOneLine()
+    {
+        MillerHarness h;
+        const QString file = h.files.createFile(QStringLiteral("Optics\r\nreference\nnotes\u2028v2.txt"));
+        QVERIFY(h.loadMiller());
+        auto *current = h.item("millerCurrentColumn");
+        QVERIFY(current);
+        QVERIFY(QMetaObject::invokeMethod(h.view.rootObject(), "focusPath",
+                                          Q_ARG(QVariant, file), Q_ARG(QVariant, true)));
+        QTRY_VERIFY(current->hasActiveFocus());
+        const int row = current->property("cursorIndex").toInt();
+        QCOMPARE(h.model->filePath(row), file);
+        QQuickItem *entry = nullptr;
+        QVERIFY(QMetaObject::invokeMethod(current, "itemAtIndex",
+                                          Q_RETURN_ARG(QQuickItem *, entry), Q_ARG(int, row)));
+        QVERIFY(entry);
+        auto *label = ViewHarness::findItem(entry, "millerCurrentName");
+        QVERIFY(label);
+        QCOMPARE(label->property("lineCount").toInt(), 1);
+        QCOMPARE(label->property("text").toString(), QStringLiteral("Optics reference notes v2.txt"));
+        QVERIFY(label->height() <= entry->height());
+
+        QSignalSpy activation(h.view.rootObject(), SIGNAL(fileActivated(QString,bool)));
+        QVERIFY(activation.isValid());
+        QTest::keyClick(&h.view, Qt::Key_Return);
+        QCOMPARE(activation.size(), 1);
+        QCOMPARE(activation.takeFirst(), QVariantList({file, false}));
+    }
+
     void testArrowNavigationBetweenFileAndPreview()
     {
         MillerHarness h;
