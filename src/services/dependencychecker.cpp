@@ -503,6 +503,47 @@ void DependencyChecker::populate()
     });
 
     m_deps.append({
+        QStringLiteral("mupdf"),
+        QStringLiteral("E-book preview (mutool)"),
+        QStringLiteral("Render EPUB, MOBI, AZW, FB2, CBZ, and XPS previews."),
+        Kind::Tool, false,
+        hasExecutable(QStringLiteral("mutool")),
+        {QStringLiteral("mutool")},
+        buildHints(QStringLiteral("mupdf-tools"), {
+            {QStringLiteral("fedora"),    QStringLiteral("mupdf")},
+            {QStringLiteral("rhel"),      QStringLiteral("mupdf")},
+            {QStringLiteral("opensuse"),  QStringLiteral("mupdf")},
+            {QStringLiteral("suse"),      QStringLiteral("mupdf")},
+            {QStringLiteral("void"),      QStringLiteral("mupdf")},
+            {QStringLiteral("gentoo"),    QStringLiteral("app-text/mupdf")},
+            {QStringLiteral("nixos"),     QStringLiteral("mupdf-headless")},
+        })
+    });
+
+    m_deps.append({
+        QStringLiteral("djvulibre"),
+        QStringLiteral("DjVu preview (djvulibre)"),
+        QStringLiteral("Render DjVu document previews and metadata."),
+        Kind::Tool, false,
+        hasExecutable(QStringLiteral("ddjvu"))
+            && hasExecutable(QStringLiteral("djvused")),
+        {QStringLiteral("ddjvu"), QStringLiteral("djvused")},
+        buildHints(QStringLiteral("djvulibre-bin"), {
+            {QStringLiteral("arch"),      QStringLiteral("djvulibre")},
+            {QStringLiteral("manjaro"),   QStringLiteral("djvulibre")},
+            {QStringLiteral("endeavouros"), QStringLiteral("djvulibre")},
+            {QStringLiteral("cachyos"),   QStringLiteral("djvulibre")},
+            {QStringLiteral("fedora"),    QStringLiteral("djvulibre")},
+            {QStringLiteral("rhel"),      QStringLiteral("djvulibre")},
+            {QStringLiteral("opensuse"),  QStringLiteral("djvulibre")},
+            {QStringLiteral("suse"),      QStringLiteral("djvulibre")},
+            {QStringLiteral("void"),      QStringLiteral("djvulibre")},
+            {QStringLiteral("gentoo"),    QStringLiteral("app-text/djvulibre")},
+            {QStringLiteral("nixos"),     QStringLiteral("djvulibre")},
+        })
+    });
+
+    m_deps.append({
         QStringLiteral("exiftool"),
         QStringLiteral("EXIF metadata (exiftool)"),
         QStringLiteral("Read camera, GPS and timestamp metadata from images."),

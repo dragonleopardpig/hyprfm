@@ -14,6 +14,8 @@ class PreviewService : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(bool pdfPreviewAvailable READ pdfPreviewAvailable NOTIFY supportChanged)
+    Q_PROPERTY(bool ebookPreviewAvailable READ ebookPreviewAvailable NOTIFY supportChanged)
+    Q_PROPERTY(bool djvuPreviewAvailable READ djvuPreviewAvailable NOTIFY supportChanged)
 
 public:
     explicit PreviewService(QObject *parent = nullptr);
@@ -24,6 +26,11 @@ public:
     void setMetadataExtractor(MetadataExtractor *extractor);
 
     bool pdfPreviewAvailable() const;
+    bool ebookPreviewAvailable() const;
+    bool djvuPreviewAvailable() const;
+    Q_INVOKABLE bool isEbookPath(const QString &path, const QString &mimeType = QString()) const;
+    Q_INVOKABLE bool isDocumentPreviewAvailable(const QString &path, const QString &mimeType = QString()) const;
+    Q_INVOKABLE QString documentKindLabel(const QString &path, const QString &mimeType = QString()) const;
 
     // Async entry point. `kind` is one of "text", "source", "pdf", "archive",
     // "directory", "font", or "" for metadata only. Results arrive on previewReady;
@@ -73,8 +80,10 @@ private:
     // Only reading a font happens on the worker. Qt registers the bytes on
     // the GUI thread because QFontDatabase belongs to the GUI.
     QVariantMap registerFontPreview(const QString &path, const QByteArray &bytes);
+    QVariantMap loadDocumentPreview(const QString &path, QVariantMap *metaOut = nullptr) const;
     QVariantMap buildPreview(const QString &path, const QString &kind,
-                             const QString &password, bool lightTheme) const;
+                             const QString &password, bool lightTheme,
+                             bool extractMetadata = false) const;
 
     QByteArray readPathBytes(const QString &path, qint64 maxBytes, bool *truncated,
                              QString *error) const;

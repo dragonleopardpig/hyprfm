@@ -17,6 +17,8 @@
 #include <QUuid>
 
 #include "services/previewservice.h"
+#include "services/metadataextractor.h"
+#include "ebooktestdata.h"
 
 class TestPreviewService : public QObject
 {
@@ -807,6 +809,106 @@ private slots:
         QStringList requesters{spy.at(0).at(0).toString(), spy.at(1).at(0).toString()};
         requesters.sort();
         QCOMPARE(requesters, (QStringList{"miller", "quick"}));
+    }
+
+    void testEbookDetectionAndKindLabels()
+    {
+        PreviewService service;
+        QVERIFY(service.isEbookPath(QStringLiteral("/tmp/book.epub")));
+        QVERIFY(service.isEbookPath(QStringLiteral("/tmp/book.MOBI")));
+        QVERIFY(service.isEbookPath(QStringLiteral("/tmp/book.azw3")));
+        QVERIFY(service.isEbookPath(QStringLiteral("/tmp/book.azw")));
+        QVERIFY(service.isEbookPath(QStringLiteral("/tmp/book.prc")));
+        QVERIFY(service.isEbookPath(QStringLiteral("/tmp/book.fb2")));
+        QVERIFY(service.isEbookPath(QStringLiteral("/tmp/book.fb2.zip")));
+        QVERIFY(service.isEbookPath(QStringLiteral("/tmp/comic.cbz")));
+        QVERIFY(service.isEbookPath(QStringLiteral("/tmp/comic.cbt")));
+        QVERIFY(service.isEbookPath(QStringLiteral("/tmp/doc.xps")));
+        QVERIFY(service.isEbookPath(QStringLiteral("/tmp/doc.oxps")));
+        QVERIFY(service.isEbookPath(QStringLiteral("/tmp/scan.djvu")));
+        QVERIFY(service.isEbookPath(QStringLiteral("/tmp/scan.djv")));
+        QVERIFY(!service.isEbookPath(QStringLiteral("/tmp/doc.pdf")));
+        QVERIFY(!service.isEbookPath(QStringLiteral("/tmp/archive.zip")));
+
+        QCOMPARE(service.documentKindLabel(QStringLiteral("/tmp/book.epub")), QStringLiteral("EPUB"));
+        QCOMPARE(service.documentKindLabel(QStringLiteral("/tmp/book.mobi")), QStringLiteral("MOBI"));
+        QCOMPARE(service.documentKindLabel(QStringLiteral("/tmp/book.azw3")), QStringLiteral("AZW3"));
+        QCOMPARE(service.documentKindLabel(QStringLiteral("/tmp/book.fb2.zip")), QStringLiteral("FictionBook"));
+        QCOMPARE(service.documentKindLabel(QStringLiteral("/tmp/comic.cbz")), QStringLiteral("CBZ"));
+        QCOMPARE(service.documentKindLabel(QStringLiteral("/tmp/scan.djvu")), QStringLiteral("DjVu"));
+    }
+
+    void testLoadEbookAndDjvuPreviewsAndMetadata()
+    {
+        PreviewService service;
+        MetadataExtractor extractor;
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        if (service.ebookPreviewAvailable()) {
+            const QString epub = dir.filePath(QStringLiteral("dune.epub"));
+            const QString mobi = dir.filePath(QStringLiteral("note.mobi"));
+            const QString azw3 = dir.filePath(QStringLiteral("note.azw3"));
+            const QString fb2 = dir.filePath(QStringLiteral("story.fb2"));
+            const QString fb2z = dir.filePath(QStringLiteral("story.fb2.zip"));
+            const QString cbz = dir.filePath(QStringLiteral("comic.cbz"));
+
+            QVERIFY(EbookTestData::createMinimalEpub(epub, QStringLiteral("Dune"), QStringLiteral("Frank Herbert"), 2));
+            QVERIFY(EbookTestData::createMinimalMobi(mobi, QStringLiteral("Mobi Title")));
+            QVERIFY(EbookTestData::createMinimalMobi(azw3, QStringLiteral("AZW3 Title")));
+            QVERIFY(EbookTestData::createMinimalFb2(fb2, QStringLiteral("FB2 Title"), QStringLiteral("Jane Doe")));
+            QVERIFY(EbookTestData::createMinimalFb2Zip(fb2z, QStringLiteral("Zipped FB2"), QStringLiteral("Jane Doe")));
+            QVERIFY(EbookTestData::createMinimalCbz(cbz, 2));
+
+            const QVariantMap epubPrev = service.loadPdfPreview(epub);
+            QCOMPARE(epubPrev.value(QStringLiteral("error")).toString(), QString());
+            QCOMPARE(epubPrev.value(QStringLiteral("pageCount")).toInt(), 2);
+            const QVariantMap epubMeta = extractor.extract(epub);
+            QCOMPARE(epubMeta.value(QStringLiteral("Title")).toString(), QStringLiteral("Dune"));
+            QCOMPARE(epubMeta.value(QStringLiteral("Author")).toString(), QStringLiteral("Frank Herbert"));
+            QCOMPARE(epubMeta.value(QStringLiteral("Pages")).toString(), QStringLiteral("2"));
+
+            const QVariantMap mobiPrev = service.loadPdfPreview(mobi);
+            QCOMPARE(mobiPrev.value(QStringLiteral("error")).toString(), QString());
+            QVERIFY(mobiPrev.value(QStringLiteral("pageCount")).toInt() >= 1);
+
+            const QVariantMap azw3Prev = service.loadPdfPreview(azw3);
+            QCOMPARE(azw3Prev.value(QStringLiteral("error")).toString(), QString());
+            QVERIFY(azw3Prev.value(QStringLiteral("pageCount")).toInt() >= 1);
+
+            const QVariantMap fb2Prev = service.loadPdfPreview(fb2);
+            QCOMPARE(fb2Prev.value(QStringLiteral("error")).toString(), QString());
+            QVERIFY(fb2Prev.value(QStringLiteral("pageCount")).toInt() >= 1);
+            const QVariantMap fb2Meta = extractor.extract(fb2);
+            QCOMPARE(fb2Meta.value(QStringLiteral("Title")).toString(), QStringLiteral("FB2 Title"));
+            QCOMPARE(fb2Meta.value(QStringLiteral("Author")).toString(), QStringLiteral("Jane Doe"));
+
+            const QVariantMap fb2zPrev = service.loadPdfPreview(fb2z);
+            QCOMPARE(fb2zPrev.value(QStringLiteral("error")).toString(), QString());
+            QVERIFY(fb2zPrev.value(QStringLiteral("pageCount")).toInt() >= 1);
+
+            const QVariantMap cbzPrev = service.loadPdfPreview(cbz);
+            QCOMPARE(cbzPrev.value(QStringLiteral("error")).toString(), QString());
+            QCOMPARE(cbzPrev.value(QStringLiteral("pageCount")).toInt(), 2);
+
+            const QString fakeEpub = dir.filePath(QStringLiteral("corrupt.epub"));
+            QFile bad(fakeEpub);
+            QVERIFY(bad.open(QIODevice::WriteOnly));
+            bad.write("not a zip");
+            bad.close();
+            QVERIFY(!service.loadPdfPreview(fakeEpub).value(QStringLiteral("error")).toString().isEmpty());
+        }
+
+        if (service.djvuPreviewAvailable() && !QStandardPaths::findExecutable(QStringLiteral("c44")).isEmpty()) {
+            const QString djvu = dir.filePath(QStringLiteral("scan.djvu"));
+            QVERIFY(EbookTestData::createMinimalDjvu(djvu));
+            const QVariantMap djvuPrev = service.loadPdfPreview(djvu);
+            QCOMPARE(djvuPrev.value(QStringLiteral("error")).toString(), QString());
+            QCOMPARE(djvuPrev.value(QStringLiteral("pageCount")).toInt(), 1);
+            const QVariantMap djvuMeta = extractor.extract(djvu);
+            QCOMPARE(djvuMeta.value(QStringLiteral("Pages")).toString(), QStringLiteral("1"));
+        }
     }
 };
 

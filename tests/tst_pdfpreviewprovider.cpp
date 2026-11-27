@@ -13,6 +13,7 @@
 #include <QUrl>
 
 #include "providers/pdfpreviewprovider.h"
+#include "ebooktestdata.h"
 
 class TestPdfPreviewProvider : public QObject
 {
@@ -290,6 +291,77 @@ private slots:
         PdfPreviewProvider fresh;
         const QImage second = renderAndWait(fresh, id, QSize(400, 500));
         QCOMPARE(second.size(), first.size());
+    }
+
+    void testProviderRendersEbookAndComicFormats()
+    {
+        if (QStandardPaths::findExecutable(QStringLiteral("mutool")).isEmpty())
+            QSKIP("mutool not installed");
+
+        QTemporaryDir cacheDir;
+        QVERIFY(cacheDir.isValid());
+        const QByteArray previousCacheHome = qgetenv("XDG_CACHE_HOME");
+        qputenv("XDG_CACHE_HOME", cacheDir.path().toLocal8Bit());
+        const auto restore = qScopeGuard([&] {
+            if (previousCacheHome.isEmpty())
+                qunsetenv("XDG_CACHE_HOME");
+            else
+                qputenv("XDG_CACHE_HOME", previousCacheHome);
+        });
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        const QString epub = dir.filePath(QStringLiteral("book.epub"));
+        const QString mobi = dir.filePath(QStringLiteral("book.mobi"));
+        const QString fb2 = dir.filePath(QStringLiteral("book.fb2"));
+        const QString cbz = dir.filePath(QStringLiteral("comic.cbz"));
+        QVERIFY(EbookTestData::createMinimalEpub(epub, QStringLiteral("Book"), QStringLiteral("Author"), 2));
+        QVERIFY(EbookTestData::createMinimalMobi(mobi, QStringLiteral("Mobi")));
+        QVERIFY(EbookTestData::createMinimalFb2(fb2, QStringLiteral("FB2"), QStringLiteral("Jane Doe")));
+        QVERIFY(EbookTestData::createMinimalCbz(cbz));
+
+        PdfPreviewProvider provider;
+        for (const QString &doc : {epub, mobi, fb2, cbz}) {
+            const QString id = QString::fromLatin1(QUrl::toPercentEncoding(doc)) + QStringLiteral("?page=0");
+            const QImage img = renderAndWait(provider, id, QSize(400, 500));
+            QVERIFY2(!img.isNull(), qPrintable(doc));
+        }
+
+        // Verify disk cache hit on fresh provider for epub.
+        PdfPreviewProvider fresh;
+        const QString epubId = QString::fromLatin1(QUrl::toPercentEncoding(epub)) + QStringLiteral("?page=0");
+        QVERIFY(!renderAndWait(fresh, epubId, QSize(400, 500)).isNull());
+
+        if (!QStandardPaths::findExecutable(QStringLiteral("ddjvu")).isEmpty()
+            && !QStandardPaths::findExecutable(QStringLiteral("c44")).isEmpty()) {
+            const QString djvu = dir.filePath(QStringLiteral("scan.djvu"));
+            QVERIFY(EbookTestData::createMinimalDjvu(djvu));
+            const QString djvuId = QString::fromLatin1(QUrl::toPercentEncoding(djvu)) + QStringLiteral("?page=0");
+            QVERIFY(!renderAndWait(provider, djvuId, QSize(400, 500)).isNull());
+        }
+    }
+
+    void testFakeEbookIsRejectedWithoutRunningMutool()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString fakeEpub = dir.filePath(QStringLiteral("fake.epub"));
+        const QString fakeMobi = dir.filePath(QStringLiteral("fake.mobi"));
+        for (const QString &p : {fakeEpub, fakeMobi}) {
+            QFile f(p);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write(QByteArray(128, 'X'));
+        }
+
+        PdfPreviewProvider provider;
+        QElapsedTimer timer;
+        timer.start();
+        for (const QString &p : {fakeEpub, fakeMobi}) {
+            const QString id = QString::fromLatin1(QUrl::toPercentEncoding(p)) + QStringLiteral("?page=0");
+            QVERIFY(renderAndWait(provider, id, QSize(400, 500)).isNull());
+        }
+        QVERIFY2(timer.elapsed() < 50, qPrintable(QStringLiteral("took %1 ms").arg(timer.elapsed())));
     }
 };
 

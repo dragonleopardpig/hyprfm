@@ -90,6 +90,10 @@ QString RuntimeFeaturesService::installHint(const QString &feature) const
         return QStringLiteral("Install ffmpeg to enable video poster previews.");
     if (feature == QStringLiteral("pdfPreview"))
         return QStringLiteral("Install poppler-qt6 and rebuild HyprFM to enable PDF previews.");
+    if (feature == QStringLiteral("ebookPreview"))
+        return QStringLiteral("Install mupdf-tools (mutool) to enable e-book previews (EPUB, MOBI, AZW, FB2, CBZ, XPS).");
+    if (feature == QStringLiteral("djvuPreview"))
+        return QStringLiteral("Install djvulibre to enable DjVu previews.");
     if (feature == QStringLiteral("remoteAccess"))
         return QStringLiteral("Install gvfs to browse remote filesystems through Connect to Server.");
     if (feature == QStringLiteral("smbRemoteAccess"))

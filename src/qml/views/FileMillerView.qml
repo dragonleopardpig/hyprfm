@@ -1310,8 +1310,8 @@ FocusScope {
             readonly property string previewKind: {
                 if (isRemoteUri) return ""
                 if (previewIsDir) return "directory"
+                if (isPaginatedDoc) return "pdf"
                 if (isArchive) return "archive"
-                if (isPdf) return "pdf"
                 if (isFont) return "font"
                 if (showingSource) return "source"
                 if (isText) return "text"
@@ -1324,13 +1324,22 @@ FocusScope {
             readonly property string _mime: fileProps.mimeType || ""
             readonly property bool isRemoteUri: previewFilePath !== "" && fileOps.isRemotePath(previewFilePath)
             readonly property bool isTrashUri: previewFilePath.startsWith("trash:///")
-            readonly property bool isArchive: !previewIsDir && fileOps.isArchive(previewFilePath)
-            readonly property bool isImage: !isRemoteUri && !previewIsDir && _mime.startsWith("image/")
+            readonly property bool isPdf: !isRemoteUri && !previewIsDir && _mime === "application/pdf"
+            readonly property bool isEbook: !isRemoteUri && !previewIsDir && previewFilePath !== ""
+                && typeof previewService !== "undefined" && previewService
+                && previewService.isEbookPath(previewFilePath, _mime)
+            readonly property bool isPaginatedDoc: isPdf || isEbook
+            readonly property string docKindLabel: isPaginatedDoc
+                && typeof previewService !== "undefined" && previewService
+                ? previewService.documentKindLabel(previewFilePath, _mime) : "PDF"
+            readonly property bool isArchive: !previewIsDir && !isEbook && fileOps.isArchive(previewFilePath)
+            readonly property bool isImage: !isRemoteUri && !previewIsDir && !isEbook && _mime.startsWith("image/")
             readonly property bool isSvg: isImage && _mime === "image/svg+xml"
             readonly property bool isVideo: !isRemoteUri && !previewIsDir && _mime.startsWith("video/")
             readonly property bool isAudio: !isRemoteUri && !previewIsDir && (_mime.startsWith("audio/") || false)
-            readonly property bool isPdf: !isRemoteUri && !previewIsDir && _mime === "application/pdf"
-            readonly property bool pdfPreviewAvailable: previewService ? previewService.pdfPreviewAvailable : false
+            readonly property bool pdfPreviewAvailable: typeof previewService !== "undefined" && previewService
+                ? (isPaginatedDoc ? previewService.isDocumentPreviewAvailable(previewFilePath, _mime) : previewService.pdfPreviewAvailable)
+                : false
             readonly property bool videoPreviewAvailable: typeof runtimeFeatures !== "undefined" && runtimeFeatures ? runtimeFeatures.ffmpegAvailable : false
             readonly property bool textHighlightAvailable: typeof runtimeFeatures !== "undefined" && runtimeFeatures ? runtimeFeatures.batAvailable : false
             readonly property bool hasVisualPreview: !showingSource && (isImage || (isVideo && videoPreviewAvailable))
@@ -1340,13 +1349,13 @@ FocusScope {
                 return "file://" + previewFilePath
             }
             readonly property string pdfImageSource: {
-                if (!isPdf || !pdfPreview.localPath || pdfPreview.error !== "")
+                if (!isPaginatedDoc || !pdfPreview.localPath || pdfPreview.error !== "")
                     return ""
                 return "image://pdfpreview/" + encodeURIComponent(pdfPreview.localPath)
                     + "?page=" + pdfPageIndex
             }
             readonly property string pdfPageLabel: {
-                if (!isPdf || pdfPreview.pageCount <= 0)
+                if (!isPaginatedDoc || pdfPreview.pageCount <= 0)
                     return ""
                 return "Page " + (pdfPageIndex + 1) + " of " + pdfPreview.pageCount
             }
@@ -1360,12 +1369,12 @@ FocusScope {
                     ? previewFileName.substring(previewFileName.lastIndexOf(".") + 1).toLowerCase() : ""
                 return ["ttf", "otf", "woff", "woff2"].indexOf(ext) >= 0
             }
-            readonly property bool sourceAvailable: !isRemoteUri && !previewIsDir && previewFilePath !== ""
-                && (isSvg || (previewService && previewService.hasSourceView(previewFileName)))
+            readonly property bool sourceAvailable: !isRemoteUri && !previewIsDir && !isEbook && previewFilePath !== ""
+                && (isSvg || (typeof previewService !== "undefined" && previewService && previewService.hasSourceView(previewFileName)))
             readonly property bool showingSource: sourceAvailable && previewLoader.showingSource
             readonly property bool isText: {
                 if (showingSource) return true
-                if (isRemoteUri || previewIsDir || isPdf || isImage || isVideo || isAudio || isArchive || isFont) return false
+                if (isRemoteUri || previewIsDir || isPaginatedDoc || isImage || isVideo || isAudio || isArchive || isFont) return false
                 if (_mime.startsWith("text/") || sourceAvailable) return true
                 var textMimes = [
                     "application/json", "application/xml", "application/x-yaml",
@@ -1429,13 +1438,14 @@ FocusScope {
                 if (isAudio) return "Audio"
                 if (isVideo) return "Video"
                 if (fileProps.mimeDescription) return fileProps.mimeDescription
+                if (isEbook) return docKindLabel
                 var ext = previewFileName.lastIndexOf(".") >= 0
                     ? previewFileName.substring(previewFileName.lastIndexOf(".") + 1).toUpperCase() : ""
                 return ext !== "" ? ext + " file" : "File"
             }
 
             function changePdfPage(delta) {
-                if (!isPdf || pdfPreview.pageCount <= 0)
+                if (!isPaginatedDoc || pdfPreview.pageCount <= 0)
                     return
                 var next = Math.max(0, Math.min(pdfPreview.pageCount - 1, pdfPageIndex + delta))
                 if (next === pdfPageIndex)
@@ -1449,7 +1459,7 @@ FocusScope {
                     return
                 if (event.key === Qt.Key_Left) {
                     root.focusPreviousColumn()
-                } else if (!isPdf) {
+                } else if (!isPaginatedDoc) {
                     zoomControls.handleScrollKey(event)
                     return
                 } else if (event.key === Qt.Key_Up || event.key === Qt.Key_PageUp) {
@@ -1465,7 +1475,7 @@ FocusScope {
             Keys.onPressed: event => handlePreviewKey(event)
 
             function handlePdfWheel(wheel) {
-                if (!isPdf || pdfPreview.pageCount <= 1)
+                if (!isPaginatedDoc || pdfPreview.pageCount <= 1)
                     return
 
                 var delta = 0
@@ -1535,14 +1545,14 @@ FocusScope {
                     sourceAvailable: previewColumn.sourceAvailable
                     showingSource: previewColumn.showingSource
                     onSourceToggled: previewLoader.toggleSource()
-                    scrollTarget: (previewColumn.isImage && !previewColumn.showingSource) ? visualPreview : previewColumn.isPdf ? pdfPreviewImage
+                    scrollTarget: (previewColumn.isImage && !previewColumn.showingSource) ? visualPreview : previewColumn.isPaginatedDoc ? pdfPreviewImage
                         : htmlPreview.ready ? null : previewColumn.isTable ? previewTable : textPreviewFlick
                     keyboardScrollTarget: previewColumn.previewIsDir ? previewDirList
                         : previewColumn.isArchive ? archivePreviewList
                         : previewColumn.isFont ? millerFontFlick : scrollTarget
-                    pageWheel: previewColumn.isPdf ? previewColumn.handlePdfWheel : null
+                    pageWheel: previewColumn.isPaginatedDoc ? previewColumn.handlePdfWheel : null
                     available: root.visible && !previewColumn.previewIsDir
-                        && (previewColumn.isImage || previewColumn.isPdf || previewColumn.isText)
+                        && (previewColumn.isImage || previewColumn.isPaginatedDoc || previewColumn.isText)
                     onInteracted: root.interactionStarted()
                 }
 
@@ -1666,7 +1676,7 @@ FocusScope {
                         zoomFactor: (previewColumn.isImage ? zoomControls.factor : 1)
                         anchors.fill: parent
                         anchors.margins: 8
-                        visible: previewColumn.hasVisualPreview && !previewColumn.previewIsDir && !previewColumn.isPdf
+                        visible: previewColumn.hasVisualPreview && !previewColumn.previewIsDir && !previewColumn.isPaginatedDoc
                         source: previewColumn.visualSource
                         fillMode: Image.PreserveAspectFit
                         asynchronous: true
@@ -1690,14 +1700,14 @@ FocusScope {
                         smooth: true
                     }
 
-                    // PDF preview
+                    // PDF / E-book preview
                     ZoomablePreviewImage {
                         id: pdfPreviewImage
                         objectName: "millerPdfPreviewImage"
                         zoomFactor: zoomControls.factor
                         anchors.fill: parent
                         anchors.margins: 8
-                        visible: previewColumn.isPdf
+                        visible: previewColumn.isPaginatedDoc
                             && previewColumn.pdfPreviewAvailable
                             && previewColumn.pdfPreview.localPath !== ""
                             && previewColumn.pdfPreview.error === ""
@@ -1821,7 +1831,7 @@ FocusScope {
 
                         Text {
                             anchors.centerIn: parent
-                            text: previewColumn.isPdf ? "Rendering PDF..." : "Loading preview..."
+                            text: previewColumn.isPaginatedDoc ? ("Rendering " + previewColumn.docKindLabel + "...") : "Loading preview..."
                             color: Theme.text
                             font.pointSize: Theme.fontSmall
                         }
@@ -1836,14 +1846,14 @@ FocusScope {
                         Image {
                             anchors.horizontalCenter: parent.horizontalCenter
                             width: 64; height: 64
-                            source: Theme.fileIconSource((previewColumn.fileProps.iconName || (previewColumn.isPdf ? "application-pdf" : "image-x-generic")), previewColumn.fileProps.name, 48, false)
+                            source: Theme.fileIconSource((previewColumn.fileProps.iconName || (previewColumn.isPdf ? "application-pdf" : "x-office-document")), previewColumn.fileProps.name, 48, false)
                             sourceSize: Qt.size(64, 64)
                             asynchronous: true
                         }
 
                         Text {
                             anchors.horizontalCenter: parent.horizontalCenter
-                            text: previewColumn.isPdf ? "PDF preview could not be loaded" : "Preview could not be loaded"
+                            text: previewColumn.isPaginatedDoc ? (previewColumn.docKindLabel + " preview could not be loaded") : "Preview could not be loaded"
                             color: Theme.subtext
                             font.pointSize: Theme.fontSmall
                         }
@@ -1865,7 +1875,7 @@ FocusScope {
                         anchors.fill: parent
                         anchors.margins: 6
                         visible: previewColumn.isText && !previewColumn.isTable && !previewColumn.hasVisualPreview
-                            && !previewColumn.previewIsDir && !previewColumn.isPdf && !previewColumn.isArchive && !htmlPreview.ready
+                            && !previewColumn.previewIsDir && !previewColumn.isPaginatedDoc && !previewColumn.isArchive && !htmlPreview.ready
                         clip: true
                         interactive: true
                         boundsMovement: Flickable.StopAtBounds
@@ -1964,7 +1974,7 @@ FocusScope {
                         anchors.fill: parent
                         anchors.margins: 6
                         visible: previewColumn.isText && previewColumn.isTable && !previewColumn.hasVisualPreview
-                            && !previewColumn.previewIsDir && !previewColumn.isPdf && !previewColumn.isArchive
+                            && !previewColumn.previewIsDir && !previewColumn.isPaginatedDoc && !previewColumn.isArchive
                         table: visible ? previewColumn.textPreview.table : ({})
                         fontSize: (Theme.fontSmall - 1) * zoomControls.factor
                     }
@@ -1989,13 +1999,13 @@ FocusScope {
                     Column {
                         anchors.centerIn: parent
                         spacing: 10
-                        visible: previewColumn.isPdf
+                        visible: previewColumn.isPaginatedDoc
                             && (!previewColumn.pdfPreviewAvailable || previewColumn.pdfPreview.error !== "")
 
                         Image {
                             anchors.horizontalCenter: parent.horizontalCenter
                             width: 72; height: 72
-                            source: Theme.fileIconSource((previewColumn.fileProps.iconName || "application-pdf"), previewColumn.fileProps.name, 48, false)
+                            source: Theme.fileIconSource((previewColumn.fileProps.iconName || (previewColumn.isPdf ? "application-pdf" : "x-office-document")), previewColumn.fileProps.name, 48, false)
                             sourceSize: Qt.size(72, 72)
                             asynchronous: true
                         }
@@ -2004,8 +2014,8 @@ FocusScope {
                             anchors.horizontalCenter: parent.horizontalCenter
                             width: 220
                             text: previewColumn.pdfPreviewAvailable
-                                ? "PDF preview is unavailable for this file"
-                                : "PDF preview support is unavailable"
+                                ? (previewColumn.docKindLabel + " preview is unavailable for this file")
+                                : (previewColumn.docKindLabel + " preview support is unavailable")
                             color: Theme.text
                             font.pointSize: Theme.fontSmall
                             wrapMode: Text.WrapAtWordBoundaryOrAnywhere
@@ -2018,7 +2028,9 @@ FocusScope {
                             textFormat: Text.PlainText
                             text: previewColumn.pdfPreview.error !== ""
                                 ? previewColumn.pdfPreview.error
-                                : (typeof runtimeFeatures !== "undefined" && runtimeFeatures ? runtimeFeatures.installHint("pdfPreview") : "")
+                                : (typeof runtimeFeatures !== "undefined" && runtimeFeatures
+                                    ? runtimeFeatures.installHint(previewColumn.isPdf ? "pdfPreview" : (previewColumn.docKindLabel === "DjVu" ? "djvuPreview" : "ebookPreview"))
+                                    : "")
                             color: Theme.subtext
                             font.pointSize: Theme.fontSmall
                             wrapMode: Text.WrapAtWordBoundaryOrAnywhere
@@ -2134,7 +2146,7 @@ FocusScope {
                         spacing: 10
                         visible: !previewColumn.previewIsDir && !previewColumn.isArchive
                             && !previewColumn.hasVisualPreview && !previewColumn.isText
-                            && !previewColumn.isPdf && !previewColumn.isFont
+                            && !previewColumn.isPaginatedDoc && !previewColumn.isFont
                             && previewColumn.previewFilePath !== ""
 
                         Image {

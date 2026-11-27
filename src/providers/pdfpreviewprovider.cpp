@@ -1,6 +1,8 @@
 #include "providers/pdfpreviewprovider.h"
+#include "services/documentformats.h"
 #include "services/filesystemtasks.h"
 
+#include <QBuffer>
 #include <QDateTime>
 #include <QDeadlineTimer>
 #include <QFileInfo>
@@ -352,6 +354,83 @@ void PdfPreviewResponse::run()
     const auto onExit = qScopeGuard([this] { finish(); });
     if (m_cancelled.load() || m_path.isEmpty() || !QFileInfo(m_path).isFile())
         return;
+
+    const HyprFmDocuments::DocumentBackend backend = HyprFmDocuments::documentBackendForPath(m_path);
+    if (backend == HyprFmDocuments::DocumentBackend::MuPdf
+        || backend == HyprFmDocuments::DocumentBackend::DjVu) {
+        const QString executable = backend == HyprFmDocuments::DocumentBackend::MuPdf
+            ? QStringLiteral("mutool")
+            : QStringLiteral("ddjvu");
+        if (m_cancelled.load() || QStandardPaths::findExecutable(executable).isEmpty())
+            return;
+        if (!HyprFmDocuments::looksLikeDocument(m_path, backend) || m_cancelled.load())
+            return;
+
+        const int rawW = m_requestedSize.width() > 0 ? qBound(64, m_requestedSize.width(), 4096) : 1200;
+        const int rawH = m_requestedSize.height() > 0 ? qBound(64, m_requestedSize.height(), 4096) : 1600;
+        const int qw = qMin(4096, ((rawW + 63) / 64) * 64);
+        const int qh = qMin(4096, ((rawH + 63) / 64) * 64);
+        const QString tag = backend == HyprFmDocuments::DocumentBackend::MuPdf
+            ? QStringLiteral("mupdf:")
+            : QStringLiteral("djvu:");
+        const QString key = m_path + QLatin1Char('\0')
+            + QString::number(QFileInfo(m_path).lastModified().toMSecsSinceEpoch())
+            + QLatin1Char('\0') + QString::number(m_page)
+            + QLatin1Char('@') + tag + QString::number(qw) + QLatin1Char('x') + QString::number(qh);
+
+        if (tryCache(key) || tryDiskCache(key))
+            return;
+
+        {
+            QMutexLocker locker(&renderCacheMutex());
+            if (failedRenders().contains(key))
+                return;
+        }
+
+        const QStringList args = backend == HyprFmDocuments::DocumentBackend::MuPdf
+            ? QStringList{
+                QStringLiteral("draw"),
+                QStringLiteral("-q"),
+                QStringLiteral("-c"), QStringLiteral("rgb"),
+                QStringLiteral("-W"), QString::number(HyprFmDocuments::kEbookPageWidth),
+                QStringLiteral("-H"), QString::number(HyprFmDocuments::kEbookPageHeight),
+                QStringLiteral("-S"), QString::number(HyprFmDocuments::kEbookFontSize),
+                QStringLiteral("-w"), QString::number(qw),
+                QStringLiteral("-h"), QString::number(qh),
+                QStringLiteral("-F"), QStringLiteral("pnm"),
+                QStringLiteral("-o"), QStringLiteral("-"),
+                m_path,
+                QString::number(m_page + 1),
+            }
+            : QStringList{
+                QStringLiteral("-format=ppm"),
+                QStringLiteral("-page=%1").arg(m_page + 1),
+                QStringLiteral("-size=%1x%2").arg(qw).arg(qh),
+                m_path,
+                QStringLiteral("-"),
+            };
+
+        const QByteArray ppm = runPdfCommand(executable, args, 15000, m_cancelled);
+        if (m_cancelled.load())
+            return;
+        if (ppm.isEmpty() || !m_image.loadFromData(ppm, "PPM") || m_image.isNull()) {
+            m_image = QImage();
+            QMutexLocker locker(&renderCacheMutex());
+            failedRenders().insert(key);
+            return;
+        }
+
+        const qsizetype cost = m_image.sizeInBytes();
+        {
+            QMutexLocker locker(&renderCacheMutex());
+            renderCache().insert(key, new QImage(m_image), cost);
+        }
+        QByteArray jpeg;
+        QBuffer buffer(&jpeg);
+        if (buffer.open(QIODevice::WriteOnly) && m_image.save(&buffer, "JPEG", 90) && !jpeg.isEmpty())
+            writeDiskCache(key, jpeg);
+        return;
+    }
 
     if (m_cancelled.load() || QStandardPaths::findExecutable(QStringLiteral("pdftoppm")).isEmpty())
         return;

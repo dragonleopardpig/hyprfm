@@ -1,4 +1,5 @@
 #include "services/metadataextractor.h"
+#include "services/documentformats.h"
 
 #include <QFileInfo>
 #include <QImageReader>
@@ -78,6 +79,16 @@ bool MetadataExtractor::hasPdfSupport() const
     return hasExec(QStringLiteral("pdfinfo"));
 }
 
+bool MetadataExtractor::hasMuPdfSupport() const
+{
+    return hasExec(QStringLiteral("mutool"));
+}
+
+bool MetadataExtractor::hasDjVuSupport() const
+{
+    return hasExec(QStringLiteral("djvused"));
+}
+
 void MetadataExtractor::refreshSupport()
 {
     emit supportChanged();
@@ -88,21 +99,32 @@ QVariantMap MetadataExtractor::extract(const QString &path) const
     QMimeDatabase mimeDb;
     const QString mime = mimeDb.mimeTypeForFile(path).name();
 
+    const HyprFmDocuments::DocumentBackend backend = HyprFmDocuments::documentBackendForPath(path, mime);
+    if (backend == HyprFmDocuments::DocumentBackend::MuPdf)
+        return extractMuPdf(path);
+    if (backend == HyprFmDocuments::DocumentBackend::DjVu)
+        return extractDjVu(path);
+    if (backend == HyprFmDocuments::DocumentBackend::Pdf)
+        return extractPdf(path);
+
     if (mime.startsWith("image/"))
         return extractImage(path);
     if (mime.startsWith("audio/"))
         return extractAudio(path);
     if (mime.startsWith("video/"))
         return extractVideo(path);
-    if (mime == "application/pdf")
-        return extractPdf(path);
 
     return {};
 }
 
 QString MetadataExtractor::missingDepsHint(const QString &mimeType) const
 {
-    if (mimeType.startsWith("image/") && !hasExifSupport())
+    const HyprFmDocuments::DocumentBackend backend = HyprFmDocuments::documentBackendForPath(QString(), mimeType);
+    if (backend == HyprFmDocuments::DocumentBackend::MuPdf && !hasMuPdfSupport())
+        return QStringLiteral("Install mupdf-tools (mutool) for e-book metadata (title, author, pages)");
+    if (backend == HyprFmDocuments::DocumentBackend::DjVu && !hasDjVuSupport())
+        return QStringLiteral("Install djvulibre for DjVu metadata (title, author, pages)");
+    if (mimeType.startsWith("image/") && backend == HyprFmDocuments::DocumentBackend::None && !hasExifSupport())
         return QStringLiteral("Install exiftool for camera metadata (make/model, ISO, aperture, GPS)");
     if (mimeType.startsWith("audio/") && !hasTagLibSupport())
         return QStringLiteral("Install ffmpeg for audio metadata (artist, album, genre, duration)");
@@ -434,4 +456,41 @@ QVariantMap MetadataExtractor::extractPdf(const QString &path) const
     put("PDF version", "PDF version");
 
     return meta;
+}
+
+QVariantMap MetadataExtractor::extractMuPdf(const QString &path) const
+{
+    if (!hasMuPdfSupport()
+        || !HyprFmDocuments::looksLikeDocument(path, HyprFmDocuments::DocumentBackend::MuPdf))
+        return {};
+    const QString scriptPath = HyprFmDocuments::ensureMutoolInfoScript();
+    if (scriptPath.isEmpty())
+        return {};
+    QProcess proc;
+    proc.start(QStringLiteral("mutool"), {QStringLiteral("run"), scriptPath, path});
+    if (!proc.waitForFinished(10000) || proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0)
+        return {};
+    return HyprFmDocuments::parseMutoolInfoOutput(QString::fromUtf8(proc.readAllStandardOutput()));
+}
+
+QVariantMap MetadataExtractor::extractDjVu(const QString &path) const
+{
+    if (!hasDjVuSupport()
+        || !HyprFmDocuments::looksLikeDocument(path, HyprFmDocuments::DocumentBackend::DjVu))
+        return {};
+    QProcess countProc;
+    countProc.start(QStringLiteral("djvused"), {QStringLiteral("-e"), QStringLiteral("n"), path});
+    int pages = 0;
+    if (countProc.waitForFinished(5000) && countProc.exitStatus() == QProcess::NormalExit
+        && countProc.exitCode() == 0) {
+        pages = QString::fromUtf8(countProc.readAllStandardOutput()).trimmed().toInt();
+    }
+    QProcess metaProc;
+    metaProc.start(QStringLiteral("djvused"),
+                   {QStringLiteral("-u"), QStringLiteral("-e"), QStringLiteral("print-meta"), path});
+    const QString metaText = (metaProc.waitForFinished(5000)
+        && metaProc.exitStatus() == QProcess::NormalExit && metaProc.exitCode() == 0)
+        ? QString::fromUtf8(metaProc.readAllStandardOutput())
+        : QString();
+    return HyprFmDocuments::parseDjvuMetadataOutput(metaText, pages);
 }

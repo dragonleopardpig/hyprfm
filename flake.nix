@@ -194,6 +194,8 @@
               pkgs.bat
               pkgs.md4c # md2html, for rendered Markdown previews
               pkgs.poppler-utils # pdftoppm, pdfinfo
+              pkgs.mupdf-headless.bin # mutool, for EPUB/MOBI/FB2/CBZ/XPS previews
+              pkgs.djvulibre.bin # ddjvu, djvused, for DjVu previews
             ])
 
             # File and folder icons come from the system icon theme via
@@ -255,6 +257,13 @@
         {
           default = pkgs.mkShell {
             inputsFrom = [ self.packages.${system}.hyprfm ];
+            packages = with pkgs; [
+              poppler-utils
+              mupdf-headless.bin
+              djvulibre.bin
+              bat
+              md4c
+            ];
           };
         }
       );

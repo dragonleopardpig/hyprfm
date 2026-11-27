@@ -1,4 +1,5 @@
 #include "services/previewservice.h"
+#include "services/documentformats.h"
 #include "services/filesystemtasks.h"
 #include "services/archivepassword.h"
 
@@ -546,8 +547,8 @@ void PreviewService::requestPreview(const QString &requester, const QString &pat
             // These helpers read only their arguments. Give the job its own
             // objects so closing a window never joins a blocked preview.
             const PreviewService worker;
-            QVariantMap data = worker.buildPreview(path, kind, password, lightTheme);
-            if (extractMetadata)
+            QVariantMap data = worker.buildPreview(path, kind, password, lightTheme, extractMetadata);
+            if (extractMetadata && !data.contains(QStringLiteral("metadata")))
                 data["metadata"] = MetadataExtractor().extract(path);
             return data;
         }, [this, requester, path](QVariantMap data) {
@@ -559,7 +560,8 @@ void PreviewService::requestPreview(const QString &requester, const QString &pat
 }
 
 QVariantMap PreviewService::buildPreview(const QString &path, const QString &kind,
-                                         const QString &password, bool lightTheme) const
+                                         const QString &password, bool lightTheme,
+                                         bool extractMetadata) const
 {
     QVariantMap data;
 
@@ -567,9 +569,14 @@ QVariantMap PreviewService::buildPreview(const QString &path, const QString &kin
         const bool sourceOnly = kind == QLatin1String("source");
         const int maxLines = !sourceOnly && isHtmlPath(path) ? 0 : 400;
         data["text"] = loadTextPreview(path, 131072, maxLines, lightTheme, sourceOnly);
-    } else if (kind == QLatin1String("pdf"))
-        data["pdf"] = loadPdfPreview(path);
-    else if (kind == QLatin1String("archive"))
+    } else if (kind == QLatin1String("pdf")) {
+        QVariantMap docMeta;
+        const bool wantInlineMeta = extractMetadata
+            && HyprFmDocuments::isEbookBackend(HyprFmDocuments::documentBackendForPath(path));
+        data["pdf"] = loadDocumentPreview(path, wantInlineMeta ? &docMeta : nullptr);
+        if (wantInlineMeta)
+            data["metadata"] = docMeta;
+    } else if (kind == QLatin1String("archive"))
         data["archive"] = loadArchivePreview(path, 200, password);
     else if (kind == QLatin1String("directory"))
         data["directory"] = loadDirectoryPreview(path);
@@ -587,6 +594,42 @@ bool PreviewService::pdfPreviewAvailable() const
 {
     return !QStandardPaths::findExecutable(QStringLiteral("pdftoppm")).isEmpty()
         && !QStandardPaths::findExecutable(QStringLiteral("pdfinfo")).isEmpty();
+}
+
+bool PreviewService::ebookPreviewAvailable() const
+{
+    return !QStandardPaths::findExecutable(QStringLiteral("mutool")).isEmpty();
+}
+
+bool PreviewService::djvuPreviewAvailable() const
+{
+    return !QStandardPaths::findExecutable(QStringLiteral("ddjvu")).isEmpty()
+        && !QStandardPaths::findExecutable(QStringLiteral("djvused")).isEmpty();
+}
+
+bool PreviewService::isEbookPath(const QString &path, const QString &mimeType) const
+{
+    return HyprFmDocuments::isEbookBackend(
+        HyprFmDocuments::documentBackendForPath(path, mimeType));
+}
+
+bool PreviewService::isDocumentPreviewAvailable(const QString &path, const QString &mimeType) const
+{
+    switch (HyprFmDocuments::documentBackendForPath(path, mimeType)) {
+    case HyprFmDocuments::DocumentBackend::MuPdf:
+        return ebookPreviewAvailable();
+    case HyprFmDocuments::DocumentBackend::DjVu:
+        return djvuPreviewAvailable();
+    case HyprFmDocuments::DocumentBackend::Pdf:
+    case HyprFmDocuments::DocumentBackend::None:
+        return pdfPreviewAvailable();
+    }
+    return false;
+}
+
+QString PreviewService::documentKindLabel(const QString &path, const QString &mimeType) const
+{
+    return HyprFmDocuments::documentKindLabel(path, mimeType);
 }
 
 void PreviewService::refreshSupport()
@@ -802,7 +845,7 @@ QString PreviewService::localPreviewPath(const QString &path) const
     QDir().mkpath(cacheRoot);
     QFile::setPermissions(cacheRoot, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
 
-    const QString suffix = QFileInfo(QUrl(path).fileName()).suffix();
+    const QString suffix = HyprFmDocuments::documentSuffixForPath(path);
     const QString hash = QString::fromLatin1(QCryptographicHash::hash(path.toUtf8(), QCryptographicHash::Sha1).toHex());
     const QString cachedPath = QDir(cacheRoot).filePath(suffix.isEmpty() ? hash : hash + "." + suffix);
 
@@ -891,7 +934,7 @@ QVariantMap PreviewService::registerFontPreview(const QString &path, const QByte
     return result;
 }
 
-QVariantMap PreviewService::loadPdfPreview(const QString &path) const
+QVariantMap PreviewService::loadDocumentPreview(const QString &path, QVariantMap *metaOut) const
 {
     QVariantMap result;
     result["localPath"] = QString();
@@ -899,8 +942,94 @@ QVariantMap PreviewService::loadPdfPreview(const QString &path) const
     result["error"] = QString();
 
     const QString localPath = localPreviewPath(path);
+    HyprFmDocuments::DocumentBackend backend = HyprFmDocuments::documentBackendForPath(
+        localPath.isEmpty() ? path : localPath);
+    if (backend == HyprFmDocuments::DocumentBackend::None)
+        backend = HyprFmDocuments::documentBackendForPath(path);
+    if (backend == HyprFmDocuments::DocumentBackend::None)
+        backend = HyprFmDocuments::DocumentBackend::Pdf;
+
     if (localPath.isEmpty()) {
-        result["error"] = QStringLiteral("Unable to prepare PDF preview");
+        result["error"] = backend == HyprFmDocuments::DocumentBackend::Pdf
+            ? QStringLiteral("Unable to prepare PDF preview")
+            : QStringLiteral("Unable to prepare document preview");
+        return result;
+    }
+
+    if (backend == HyprFmDocuments::DocumentBackend::MuPdf) {
+        if (!ebookPreviewAvailable()) {
+            result["error"] = QStringLiteral("Install mupdf (mutool) for e-book preview");
+            return result;
+        }
+        if (!HyprFmDocuments::looksLikeDocument(localPath, backend)) {
+            result["error"] = QStringLiteral("Unable to open e-book document");
+            return result;
+        }
+        const QString scriptPath = HyprFmDocuments::ensureMutoolInfoScript();
+        if (scriptPath.isEmpty()) {
+            result["error"] = QStringLiteral("Unable to prepare e-book inspector");
+            return result;
+        }
+        QProcess proc;
+        proc.start(QStringLiteral("mutool"), {QStringLiteral("run"), scriptPath, localPath});
+        if (!proc.waitForFinished(10000) || proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0) {
+            const QString err = QString::fromUtf8(proc.readAllStandardError());
+            if (err.contains(QLatin1String("drm"), Qt::CaseInsensitive)
+                || err.contains(QLatin1String("encrypt"), Qt::CaseInsensitive)
+                || err.contains(QLatin1String("password"), Qt::CaseInsensitive)) {
+                result["error"] = QStringLiteral("This e-book is DRM-protected and cannot be previewed");
+            } else {
+                result["error"] = QStringLiteral("Unable to open e-book document");
+            }
+            return result;
+        }
+        int pageCount = 0;
+        const QVariantMap meta = HyprFmDocuments::parseMutoolInfoOutput(
+            QString::fromUtf8(proc.readAllStandardOutput()), &pageCount);
+        if (pageCount <= 0) {
+            result["error"] = QStringLiteral("Unable to read e-book page count");
+            return result;
+        }
+        if (metaOut)
+            *metaOut = meta;
+        result["localPath"] = localPath;
+        result["pageCount"] = pageCount;
+        return result;
+    }
+
+    if (backend == HyprFmDocuments::DocumentBackend::DjVu) {
+        if (!djvuPreviewAvailable()) {
+            result["error"] = QStringLiteral("Install djvulibre for DjVu preview");
+            return result;
+        }
+        if (!HyprFmDocuments::looksLikeDocument(localPath, backend)) {
+            result["error"] = QStringLiteral("Unable to open DjVu document");
+            return result;
+        }
+        QProcess proc;
+        proc.start(QStringLiteral("djvused"), {QStringLiteral("-e"), QStringLiteral("n"), localPath});
+        if (!proc.waitForFinished(5000) || proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0) {
+            result["error"] = QStringLiteral("Unable to open DjVu document");
+            return result;
+        }
+        bool ok = false;
+        const int pageCount = QString::fromUtf8(proc.readAllStandardOutput()).trimmed().toInt(&ok);
+        if (!ok || pageCount <= 0) {
+            result["error"] = QStringLiteral("Unable to read DjVu page count");
+            return result;
+        }
+        if (metaOut) {
+            QProcess metaProc;
+            metaProc.start(QStringLiteral("djvused"),
+                           {QStringLiteral("-u"), QStringLiteral("-e"), QStringLiteral("print-meta"), localPath});
+            const QString metaText = (metaProc.waitForFinished(5000)
+                && metaProc.exitStatus() == QProcess::NormalExit && metaProc.exitCode() == 0)
+                ? QString::fromUtf8(metaProc.readAllStandardOutput())
+                : QString();
+            *metaOut = HyprFmDocuments::parseDjvuMetadataOutput(metaText, pageCount);
+        }
+        result["localPath"] = localPath;
+        result["pageCount"] = pageCount;
         return result;
     }
 
@@ -928,6 +1057,11 @@ QVariantMap PreviewService::loadPdfPreview(const QString &path) const
     result["localPath"] = localPath;
     result["pageCount"] = m.captured(1).toInt();
     return result;
+}
+
+QVariantMap PreviewService::loadPdfPreview(const QString &path) const
+{
+    return loadDocumentPreview(path, nullptr);
 }
 
 QByteArray PreviewService::readPathBytes(const QString &path, qint64 maxBytes, bool *truncated,

@@ -99,17 +99,22 @@ FocusScope {
     }
 
     readonly property bool isDirectory: fileProps.isDir || false
-    readonly property bool isArchive: !isDirectory && fileOps.isArchive(filePath)
     readonly property bool isTrashUri: filePath.startsWith("trash:///")
     readonly property bool isRemoteUri: fileOps.isRemotePath(filePath)
     readonly property string _mime: fileProps.mimeType || ""
-    readonly property bool isImage: !isRemoteUri && !isDirectory && _mime.startsWith("image/")
+    readonly property bool isPdf: !isRemoteUri && !isDirectory && _mime === "application/pdf"
+    readonly property bool isEbook: !isRemoteUri && !isDirectory && filePath !== ""
+        && previewService.isEbookPath(filePath, _mime)
+    readonly property bool isPaginatedDoc: isPdf || isEbook
+    readonly property string docKindLabel: isPaginatedDoc
+        ? previewService.documentKindLabel(filePath, _mime) : "PDF"
+    readonly property bool isArchive: !isDirectory && !isEbook && fileOps.isArchive(filePath)
+    readonly property bool isImage: !isRemoteUri && !isDirectory && !isEbook && _mime.startsWith("image/")
     // SVGs need explicit routing through the thumbnail provider (QSvgRenderer
     // path). Qt's default Image handler treats viewBox-only SVGs as 0×0.
     readonly property bool isSvg: isImage && _mime === "image/svg+xml"
     readonly property bool isVideo: !isRemoteUri && !isDirectory && _mime.startsWith("video/")
     readonly property bool isAudio: !isRemoteUri && !isDirectory && _mime.startsWith("audio/")
-    readonly property bool isPdf: !isRemoteUri && !isDirectory && _mime === "application/pdf"
     readonly property bool isFont: {
         if (isRemoteUri || isDirectory)
             return false
@@ -118,12 +123,12 @@ FocusScope {
             return true
         return ["ttf", "otf", "woff", "woff2"].indexOf(fileExtension) >= 0
     }
-    readonly property bool sourceAvailable: !isRemoteUri && !isDirectory && filePath !== ""
+    readonly property bool sourceAvailable: !isRemoteUri && !isDirectory && !isEbook && filePath !== ""
         && (isSvg || (previewService && previewService.hasSourceView(fileName)))
     readonly property bool showingSource: sourceAvailable && previewLoader.showingSource
     readonly property bool isText: {
         if (showingSource) return true
-        if (isRemoteUri || isDirectory || isPdf || isImage || isVideo || isAudio || isArchive || isFont)
+        if (isRemoteUri || isDirectory || isPaginatedDoc || isImage || isVideo || isAudio || isArchive || isFont)
             return false
         if (_mime.startsWith("text/") || sourceAvailable)
             return true
@@ -167,8 +172,8 @@ FocusScope {
     readonly property string previewKind: {
         if (isRemoteUri) return ""
         if (isDirectory) return "directory"
+        if (isPaginatedDoc) return "pdf"
         if (isArchive) return "archive"
-        if (isPdf) return "pdf"
         if (isFont) return "font"
         if (showingSource) return "source"
         if (isText) return "text"
@@ -185,17 +190,19 @@ FocusScope {
         }
     }
 
-    readonly property bool pdfPreviewAvailable: previewService.pdfPreviewAvailable
+    readonly property bool pdfPreviewAvailable: isPaginatedDoc
+        ? previewService.isDocumentPreviewAvailable(filePath, _mime)
+        : previewService.pdfPreviewAvailable
     readonly property bool videoPreviewAvailable: runtimeFeatures.ffmpegAvailable
     readonly property bool textHighlightAvailable: runtimeFeatures.batAvailable
     readonly property string pdfImageSource: {
-        if (!isPdf || !pdfPreview.localPath || pdfPreview.error !== "")
+        if (!isPaginatedDoc || !pdfPreview.localPath || pdfPreview.error !== "")
             return ""
         return "image://pdfpreview/" + encodeURIComponent(pdfPreview.localPath)
             + "?page=" + pdfPageIndex
     }
     readonly property string pdfPageLabel: {
-        if (!isPdf || pdfPreview.pageCount <= 0)
+        if (!isPaginatedDoc || pdfPreview.pageCount <= 0)
             return ""
         return "Page " + (pdfPageIndex + 1) + " of " + pdfPreview.pageCount
     }
@@ -225,6 +232,8 @@ FocusScope {
             return "Video"
         if (fileProps.mimeDescription)
             return fileProps.mimeDescription
+        if (isEbook)
+            return docKindLabel
         if (fileExtension !== "")
             return fileExtension.toUpperCase() + " file"
         return "File"
@@ -342,7 +351,7 @@ FocusScope {
     }
 
     function changePdfPage(delta) {
-        if (!isPdf || pdfPreview.pageCount <= 0)
+        if (!isPaginatedDoc || pdfPreview.pageCount <= 0)
             return
         var next = Math.max(0, Math.min(pdfPreview.pageCount - 1, pdfPageIndex + delta))
         if (next === pdfPageIndex)
@@ -352,7 +361,7 @@ FocusScope {
     }
 
     function handlePdfWheel(wheel) {
-        if (!isPdf || pdfPreview.pageCount <= 1)
+        if (!isPaginatedDoc || pdfPreview.pageCount <= 1)
             return
 
         var delta = 0
@@ -390,7 +399,7 @@ FocusScope {
         cycleFile(1)
     }
     Keys.onPressed: (event) => {
-        if (!isPdf) {
+        if (!isPaginatedDoc) {
             zoomControls.handleScrollKey(event)
             return
         }
@@ -562,7 +571,7 @@ FocusScope {
                             + (root.directoryFiles.length > 1
                                 ? "  ·  " + (root.currentIndex() + 1) + " of " + root.directoryFiles.length
                                 : "")
-                            + (root.isPdf && root.pdfPageLabel !== ""
+                            + (root.isPaginatedDoc && root.pdfPageLabel !== ""
                                 ? "  ·  " + root.pdfPageLabel
                                 : "")
                         color: Theme.subtext
@@ -573,7 +582,7 @@ FocusScope {
 
                 Row {
                     spacing: 8
-                    visible: root.isPdf && root.pdfPreview.pageCount > 1
+                    visible: root.isPaginatedDoc && root.pdfPreview.pageCount > 1
 
                     Rectangle {
                         width: 34
@@ -722,12 +731,12 @@ FocusScope {
                 sourceAvailable: root.sourceAvailable
                 showingSource: root.showingSource
                 onSourceToggled: previewLoader.toggleSource()
-                scrollTarget: (root.isImage && !root.showingSource) ? visualPreview : root.isPdf ? pdfPreviewImage
+                scrollTarget: (root.isImage && !root.showingSource) ? visualPreview : root.isPaginatedDoc ? pdfPreviewImage
                     : htmlPreview.ready ? null : root.isTable ? previewTable : textPreviewFlick
                 keyboardScrollTarget: (root.isDirectory || root.isArchive) ? directoryPreviewList
                     : root.isFont ? fontPreviewFlick : scrollTarget
-                pageWheel: root.isPdf ? root.handlePdfWheel : null
-                available: root.active && (root.isImage || root.isPdf || root.isText)
+                pageWheel: root.isPaginatedDoc ? root.handlePdfWheel : null
+                available: root.active && (root.isImage || root.isPaginatedDoc || root.isText)
             }
 
             RowLayout {
@@ -780,7 +789,7 @@ FocusScope {
                             objectName: "quickPdfPreviewImage"
                             zoomFactor: zoomControls.factor
                             anchors.fill: parent
-                            visible: root.isPdf && root.pdfPreviewAvailable && root.pdfPreview.localPath !== "" && root.pdfPreview.error === ""
+                            visible: root.isPaginatedDoc && root.pdfPreviewAvailable && root.pdfPreview.localPath !== "" && root.pdfPreview.error === ""
                             source: root.pdfImageSource
                             fillMode: Image.PreserveAspectFit
                             asynchronous: true
@@ -797,13 +806,13 @@ FocusScope {
                         // exactly -- it is part of the cache key, and a
                         // mismatch silently renders everything twice.
                         Repeater {
-                            model: (root.isPdf && root.pdfPreviewAvailable
+                            model: (root.isPaginatedDoc && root.pdfPreviewAvailable
                                     && root.pdfPreview.localPath !== ""
                                     && root.pdfPreview.error === "") ? [1, -1] : []
                             Image {
                                 visible: false
                                 asynchronous: true
-                                sourceSize: Qt.size(pdfPreviewImage.width, pdfPreviewImage.height)
+                                sourceSize: pdfPreviewImage.sourceSize
                                 source: {
                                     var page = root.pdfPageIndex + modelData
                                     if (page < 0 || page >= (root.pdfPreview.pageCount || 0))
@@ -817,7 +826,7 @@ FocusScope {
 
                         MouseArea {
                             anchors.fill: parent
-                            visible: root.isPdf && root.pdfPreviewAvailable && root.pdfPreview.localPath !== "" && root.pdfPreview.error === ""
+                            visible: root.isPaginatedDoc && root.pdfPreviewAvailable && root.pdfPreview.localPath !== "" && root.pdfPreview.error === ""
                             acceptedButtons: Qt.NoButton
                             enabled: zoomControls.factor <= 1
                             onWheel: (wheel) => root.handlePdfWheel(wheel)
@@ -827,27 +836,27 @@ FocusScope {
                             anchors.centerIn: parent
                             spacing: 10
                             visible: (root.hasVisualPreview && visualPreview.status === Image.Error)
-                                || (root.isPdf && root.pdfPreviewAvailable && root.pdfPreview.localPath !== "" && pdfPreviewImage.status === Image.Error)
+                                || (root.isPaginatedDoc && root.pdfPreviewAvailable && root.pdfPreview.localPath !== "" && pdfPreviewImage.status === Image.Error)
 
                             Image {
                                 anchors.horizontalCenter: parent.horizontalCenter
                                 width: 64
                                 height: 64
-                                source: Theme.fileIconSource((root.fileProps.iconName || (root.isPdf ? "application-pdf" : "image-x-generic")), root.fileProps.name, 48, false)
+                                source: Theme.fileIconSource((root.fileProps.iconName || (root.isPdf ? "application-pdf" : "x-office-document")), root.fileProps.name, 48, false)
                                 sourceSize: Qt.size(width, height)
                                 fillMode: Image.PreserveAspectFit
                             }
 
                             Text {
                                 anchors.horizontalCenter: parent.horizontalCenter
-                                text: root.isPdf ? "PDF preview could not be loaded" : "Preview could not be loaded"
+                                text: root.isPaginatedDoc ? (root.docKindLabel + " preview could not be loaded") : "Preview could not be loaded"
                                 color: Theme.subtext
                                 font.pointSize: Theme.fontNormal
                             }
 
                             Text {
                                 anchors.horizontalCenter: parent.horizontalCenter
-                                visible: root.isPdf && root.pdfPreview.error !== ""
+                                visible: root.isPaginatedDoc && root.pdfPreview.error !== ""
                                 textFormat: Text.PlainText
                                 text: root.pdfPreview.error
                                 color: Theme.muted
@@ -858,7 +867,7 @@ FocusScope {
                         Rectangle {
                             anchors.centerIn: parent
                             visible: (root.hasVisualPreview && visualPreview.status === Image.Loading)
-                                || (root.isPdf && root.pdfPreviewAvailable && root.pdfPreview.localPath !== "" && pdfPreviewImage.status === Image.Loading)
+                                || (root.isPaginatedDoc && root.pdfPreviewAvailable && root.pdfPreview.localPath !== "" && pdfPreviewImage.status === Image.Loading)
                             color: Qt.rgba(Theme.base.r, Theme.base.g, Theme.base.b, 0.72)
                             radius: Theme.radiusMedium
                             width: 180
@@ -866,7 +875,7 @@ FocusScope {
 
                             Text {
                                 anchors.centerIn: parent
-                                text: root.isPdf ? "Rendering PDF..." : root.visualStatusText
+                                text: root.isPaginatedDoc ? ("Rendering " + root.docKindLabel + "...") : root.visualStatusText
                                 color: Theme.text
                                 font.pointSize: Theme.fontNormal
                             }
@@ -883,7 +892,7 @@ FocusScope {
                         Flickable {
                             id: textPreviewFlick
                             anchors.fill: parent
-                            visible: root.isText && !root.isTable && !root.hasVisualPreview && !root.isPdf && !htmlPreview.ready
+                            visible: root.isText && !root.isTable && !root.hasVisualPreview && !root.isPaginatedDoc && !htmlPreview.ready
                             clip: true
                             interactive: true
                             boundsMovement: Flickable.StopAtBounds
@@ -967,7 +976,7 @@ FocusScope {
                             id: previewTable
                             objectName: "quickPreviewTable"
                             anchors.fill: parent
-                            visible: root.isText && root.isTable && !root.hasVisualPreview && !root.isPdf
+                            visible: root.isText && root.isTable && !root.hasVisualPreview && !root.isPaginatedDoc
                             table: visible ? textPreview.table : ({})
                             fontSize: Theme.fontSmall * zoomControls.factor
                         }
@@ -1085,20 +1094,20 @@ FocusScope {
                         Column {
                             anchors.centerIn: parent
                             spacing: 12
-                            visible: root.isPdf && (!root.pdfPreviewAvailable || pdfPreview.error !== "")
+                            visible: root.isPaginatedDoc && (!root.pdfPreviewAvailable || pdfPreview.error !== "")
 
                             Image {
                                 anchors.horizontalCenter: parent.horizontalCenter
                                 width: 96
                                 height: 96
-                                source: Theme.fileIconSource((root.fileProps.iconName || "application-pdf"), root.fileProps.name, 48, false)
+                                source: Theme.fileIconSource((root.fileProps.iconName || (root.isPdf ? "application-pdf" : "x-office-document")), root.fileProps.name, 48, false)
                                 sourceSize: Qt.size(width, height)
                                 fillMode: Image.PreserveAspectFit
                             }
 
                             Text {
                                 anchors.horizontalCenter: parent.horizontalCenter
-                                text: root.pdfPreviewAvailable ? "PDF preview is unavailable for this file" : "PDF preview support is unavailable"
+                                text: root.pdfPreviewAvailable ? (root.docKindLabel + " preview is unavailable for this file") : (root.docKindLabel + " preview support is unavailable")
                                 color: Theme.text
                                 font.pointSize: Theme.fontNormal
                                 width: 280
@@ -1113,7 +1122,7 @@ FocusScope {
                                     ? root.pdfPreview.error
                                     : (root.pdfPreviewAvailable
                                         ? "Press Enter to open the file externally"
-                                        : runtimeFeatures.installHint("pdfPreview"))
+                                        : runtimeFeatures.installHint(root.isPdf ? "pdfPreview" : (root.docKindLabel === "DjVu" ? "djvuPreview" : "ebookPreview")))
                                 color: Theme.subtext
                                 font.pointSize: Theme.fontSmall
                                 wrapMode: Text.WordWrap
@@ -1226,7 +1235,7 @@ FocusScope {
                         Column {
                             anchors.centerIn: parent
                             spacing: 12
-                            visible: !root.hasVisualPreview && !root.isText && !root.isDirectory && !root.isArchive && !root.isPdf && !root.isFont
+                            visible: !root.hasVisualPreview && !root.isText && !root.isDirectory && !root.isArchive && !root.isPaginatedDoc && !root.isFont
 
                             Image {
                                 anchors.horizontalCenter: parent.horizontalCenter

@@ -46,6 +46,7 @@
 #include "models/tablistmodel.h"
 #include "providers/iconprovider.h"
 #include "providers/pdfpreviewprovider.h"
+#include "ebooktestdata.h"
 #include "providers/thumbnailprovider.h"
 #include "services/clipboardmanager.h"
 #include "services/configmanager.h"
@@ -1356,6 +1357,100 @@ private slots:
         const qreal magnifiedFont = table->property("fontSize").toReal();
         QVERIFY(QMetaObject::invokeMethod(controls, "reset"));
         QTRY_COMPARE(table->property("fontSize").toReal(), magnifiedFont / 3);
+    }
+
+    void testEbookPreviewNavigation_data()
+    {
+        QTest::addColumn<bool>("quick");
+        QTest::newRow("quick") << true;
+        QTest::newRow("miller") << false;
+    }
+
+    void testEbookPreviewNavigation()
+    {
+        if (QStandardPaths::findExecutable(QStringLiteral("mutool")).isEmpty())
+            QSKIP("mutool not installed");
+
+        QFETCH(bool, quick);
+        App app;
+        const QString epub = app.home.filePath(QStringLiteral("book.epub"));
+        const QString mobi = app.home.filePath(QStringLiteral("book.mobi"));
+        const QString fb2z = app.home.filePath(QStringLiteral("book.fb2.zip"));
+        QVERIFY(EbookTestData::createMinimalEpub(epub, QStringLiteral("Dune"), QStringLiteral("Frank Herbert"), 2));
+        QVERIFY(EbookTestData::createMinimalMobi(mobi, QStringLiteral("Mobi Book")));
+        QVERIFY(EbookTestData::createMinimalFb2Zip(fb2z, QStringLiteral("Zipped FB2"), QStringLiteral("Jane Doe")));
+        QString djvu;
+        if (!QStandardPaths::findExecutable(QStringLiteral("c44")).isEmpty()
+            && !QStandardPaths::findExecutable(QStringLiteral("ddjvu")).isEmpty()
+            && !QStandardPaths::findExecutable(QStringLiteral("djvused")).isEmpty()) {
+            djvu = app.home.filePath(QStringLiteral("scan.djvu"));
+            QVERIFY(EbookTestData::createMinimalDjvu(djvu));
+        }
+
+        QVERIFY(app.load());
+        app.tabModel->activeTab()->navigateTo(app.home.path());
+        app.tabModel->activeTab()->setViewMode("miller");
+        auto *model = app.engine.rootContext()->contextProperty("fsModel").value<QObject *>();
+        QTRY_COMPARE(model->property("rootPath").toString(), app.home.path());
+        QTRY_VERIFY(!model->property("isLoading").toBool());
+
+        auto preview = [&](const QString &path) {
+            if (quick) return QMetaObject::invokeMethod(app.window, "showQuickPreview", Q_ARG(QVariant, path));
+            return QMetaObject::invokeMethod(app.window, "focusPathInPane", Q_ARG(QVariant, QString("primary")),
+                                             Q_ARG(QVariant, path), Q_ARG(QVariant, true));
+        };
+
+        QVERIFY(QMetaObject::invokeMethod(app.window, "focusPathInPane", Q_ARG(QVariant, QString("primary")),
+                                          Q_ARG(QVariant, epub), Q_ARG(QVariant, true)));
+        if (quick)
+            QTest::keyClick(app.window, Qt::Key_Space);
+        else
+            QTest::keyClick(app.window, Qt::Key_Right);
+
+        QTRY_VERIFY(app.item(quick ? "quickPdfPreviewImage" : "millerPdfPreviewImage"));
+        auto *image = app.item(quick ? "quickPdfPreviewImage" : "millerPdfPreviewImage");
+        auto *scope = quick ? app.window->property("quickPreview").value<QQuickItem *>()
+                            : app.item("millerPreviewColumn");
+        QVERIFY(image && scope);
+        QTRY_VERIFY(scope->hasActiveFocus());
+        QTRY_VERIFY(scope->property("isEbook").toBool());
+        QTRY_VERIFY(!scope->property("isArchive").toBool());
+        QTRY_VERIFY(image->isVisible());
+        QTRY_COMPARE_WITH_TIMEOUT(image->property("status").toInt(), 1, 15000);
+        const QVariantMap epubMeta = scope->property("fileMetadata").toMap();
+        QCOMPARE(epubMeta.value(QStringLiteral("Title")).toString(), QStringLiteral("Dune"));
+        QCOMPARE(epubMeta.value(QStringLiteral("Author")).toString(), QStringLiteral("Frank Herbert"));
+
+        // Page flipping works on multi-page EPUBs.
+        QTest::keyClick(app.window, Qt::Key_Down);
+        QTRY_COMPARE(scope->property("pdfPageIndex").toInt(), 1);
+        QTRY_COMPARE_WITH_TIMEOUT(image->property("status").toInt(), 1, 15000);
+        QTest::keyClick(app.window, Qt::Key_PageUp);
+        QTRY_COMPARE(scope->property("pdfPageIndex").toInt(), 0);
+        QTRY_COMPARE_WITH_TIMEOUT(image->property("status").toInt(), 1, 15000);
+
+        // MOBI renders cleanly.
+        QVERIFY(preview(mobi));
+        QTRY_COMPARE(scope->property("docKindLabel").toString(), QStringLiteral("MOBI"));
+        QTRY_VERIFY(image->isVisible());
+        QTRY_COMPARE_WITH_TIMEOUT(image->property("status").toInt(), 1, 15000);
+
+        // .fb2.zip routes to e-book preview, not ZIP archive listing.
+        QVERIFY(preview(fb2z));
+        QTRY_COMPARE(scope->property("docKindLabel").toString(), QStringLiteral("FictionBook"));
+        QTRY_VERIFY(scope->property("isEbook").toBool());
+        QTRY_VERIFY(!scope->property("isArchive").toBool());
+        QTRY_VERIFY(image->isVisible());
+        QTRY_COMPARE_WITH_TIMEOUT(image->property("status").toInt(), 1, 15000);
+
+        if (!djvu.isEmpty()) {
+            QVERIFY(preview(djvu));
+            QTRY_COMPARE(scope->property("docKindLabel").toString(), QStringLiteral("DjVu"));
+            QTRY_VERIFY(scope->property("isEbook").toBool());
+            QTRY_VERIFY(!scope->property("isImage").toBool());
+            QTRY_VERIFY(image->isVisible());
+            QTRY_COMPARE_WITH_TIMEOUT(image->property("status").toInt(), 1, 15000);
+        }
     }
 
     void testFilePickerSaveAndOverwrite()
